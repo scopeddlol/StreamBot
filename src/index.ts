@@ -14,12 +14,14 @@ let stopping = false;
 async function stop() {
   if (stopping) return;
   stopping = true;
-  server.close();
+  const drained = new Promise<void>((resolve) => server.close(() => resolve()));
   const deadline = setTimeout(() => process.exit(1), 40000);
   deadline.unref();
   const clean = await runtime.shutdown();
-  server.closeAllConnections();
-  if (clean) clearTimeout(deadline);
+  if (clean) {
+    await drained;
+    clearTimeout(deadline);
+  }
   else deadline.ref();
 }
 process.once("SIGTERM", () => void stop());

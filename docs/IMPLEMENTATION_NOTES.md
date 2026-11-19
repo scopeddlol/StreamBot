@@ -79,3 +79,5 @@ Jellyfin playback controller source: https://github.com/jellyfin/jellyfin/blob/m
 ### Graceful dashboard shutdown regression
 
 A browser event stream exposed an SQLite access after shutdown. Runtime shutdown now closes event streams and removes their timers/listeners before closing SQLite, and repeated shutdown calls share one promise. The regression test passes; the complete suite is 53 tests / 273 assertions. The container smoke keeps an authenticated event stream open during stop, requires exit code zero, then verifies persisted state after start.
+
+The Linux container smoke also caught forced socket closure racing the final SSE response. Startup now awaits HTTP server drain after runtime cleanup instead of immediately destroying every connection; the existing 40-second shutdown deadline still bounds hangs.

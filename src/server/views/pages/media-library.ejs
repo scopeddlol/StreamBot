@@ -1,9 +1,10 @@
 <main id="main-content" class="container py-5">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <div><p class="text-uppercase text-muted small mb-1">StreamBot · Media libraries</p><h1>Find your next watch</h1></div>
-    <a href="/" class="btn btn-outline-secondary">Local files</a>
+    <a href="/instances" class="btn btn-outline-secondary">Instances & local files</a>
   </div>
   <div id="provider-status" class="d-flex flex-wrap gap-2 mb-3" aria-live="polite">Checking sources…</div>
+  <section class="panel"><label for="target-room">Target playback room</label><select id="target-room" class="form-select"></select><div class="toolbar"><button id="bulk-add" type="button">Add selected to room</button><label><input id="include-specials" type="checkbox"> Include TV specials</label><span id="selection-count">0 selected</span></div><p class="small">Movies/episodes add individually. Selected shows or seasons expand to a bounded episode snapshot. Live rooms add to their persistent playlist; on-demand rooms add to their queue.</p></section>
   <form id="library-search" class="row g-2 mb-4">
     <div class="col-12 col-md-4"><label for="query" class="form-label">Search</label><input id="query" class="form-control" maxlength="300" placeholder="Movies and TV shows"></div>
     <div class="col-6 col-md-2"><label for="provider" class="form-label">Source</label><select id="provider" class="form-select"><option value="all">All sources</option></select></div>
@@ -19,7 +20,7 @@
       <section id="details" class="card p-4 mb-4" hidden aria-label="Selected media" tabindex="-1"></section>
     </section>
     <aside class="col-12 col-lg-4"><div class="card p-4"><h2 class="h4">Playback queue</h2><p id="playback-state" aria-live="polite">Loading…</p>
-      <div class="d-flex flex-wrap gap-2 mb-3"><button class="btn btn-primary" data-action="start">Start queue</button><button class="btn btn-outline-secondary" data-action="skip">Skip</button><button class="btn btn-outline-danger" data-action="stop">Stop &amp; clear</button></div>
+      <div class="d-flex flex-wrap gap-2 mb-3"><button class="btn btn-primary" data-action="start">Start queue</button><button class="btn btn-outline-secondary" data-action="skip">Skip</button><button class="btn btn-outline-danger" data-action="stop">Stop instance</button></div>
       <ol id="queue" class="ps-3"></ol><p id="playback-error" class="text-danger" role="alert"></p>
     </div></aside>
   </div>

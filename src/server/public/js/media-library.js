@@ -1,14 +1,26 @@
 (() => {
   const el = id => document.getElementById(id);
   const names = new Map();
+  const selected = new Map(); let rooms = [];
+  const room = () => rooms.find(r => r.id === el("target-room").value);
   let offset = 0, busy = false, searchRun = 0, detailRun = 0;
   const node = (tag, text, className) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (className) n.className = className; return n; };
   const message = text => { el('library-message').textContent = text; };
   async function api(url, body) {
+    if (url === '/api/playback') {
+      if (!room()) return {playing:false,items:[],error:'Create/select a playback instance to queue media.'};
+      const [status, queue] = await Promise.all([api(`/api/v1/instances/${room().id}`), api(`/api/v1/instances/${room().id}/queue`)]);
+      return {playing:['streaming','connecting'].includes(status.state),currentId:status.current?.id,error:status.error,items:queue.items.map(item=>({id:item.id,title:item.source.title,source:item.source.reference?.providerId||'local / URL',requestedBy:item.actor}))};
+    }
+    if (url.startsWith('/api/playback/') && url !== '/api/playback/queue') {
+      if (!room()) throw new Error('Choose a target room');
+      url = `/api/v1/instances/${room().id}/${url.split('/').pop()}`;
+    }
+    if ((url.startsWith('/api/providers') || url.startsWith('/api/media')) && room()) url += (url.includes('?') ? '&' : '?') + 'room=' + encodeURIComponent(room().id);
     const response = await fetch(url, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (response.status === 401) { window.location.assign('/login'); throw new Error('Please sign in'); }
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Request failed');
+    if (!response.ok) throw new Error(result.message || result.error || 'Request failed');
     return result;
   }
   function button(text, action, style = 'btn btn-outline-primary btn-sm') {
@@ -21,8 +33,10 @@
   }
   function endpoint(item) { return `/api/providers/${encodeURIComponent(item.providerId)}/items/${encodeURIComponent(item.id)}`; }
   async function enqueue(item, play, version) {
-    await api('/api/playback/queue', { providerId: item.providerId, itemId: item.id, play, ...(version ? { mediaSourceId: version } : {}) });
-    message(`${item.title} added to the queue${play ? '; playback requested' : ''}.`); await refreshQueue();
+    if (!room()) throw new Error('Choose a target room first');
+    const target = room(); const selection = {providerId:item.providerId,itemId:item.id,...(version?{mediaSourceId:version}:{}),includeSpecials:el('include-specials').checked};
+    await api(`/api/v1/instances/${target.id}/${target.mode==='live'?'playlists':'queue'}`, {items:[selection],...(target.mode!=='live'?{playNow:play}:{})});
+    message(`${item.title} added to ${target.name}. Start that instance if it is stopped.`); await refreshQueue();
   }
   function actions(item, parent, version) {
     const row = node('div', undefined, 'd-flex flex-wrap gap-2 my-2');
@@ -74,8 +88,9 @@
       for (const group of groups) for (const item of group.items) {
         count++;
         const col = node('div', undefined, 'col'); const card = node('div', undefined, 'card h-100 overflow-hidden');
-        const img = node('img'); img.src = item.posterUrl; img.alt = ''; img.loading = 'lazy'; img.style = 'aspect-ratio:2/3;object-fit:cover;background:#242936'; img.addEventListener('error', () => { img.hidden = true; });
+        const img = node('img'); img.src = item.posterUrl + (room() ? "?room="+encodeURIComponent(room().id) : ""); img.alt = ''; img.loading = 'lazy'; img.style = 'aspect-ratio:2/3;object-fit:cover;background:#242936'; img.addEventListener('error', () => { img.hidden = true; });
         const body = node('div', undefined, 'card-body d-flex flex-column'); body.append(node('p', names.get(item.providerId) || item.providerId, 'small text-muted mb-1'), node('h2', item.title, 'h6'), node('p', `${item.kind}${item.year ? ` · ${item.year}` : ''}`, 'small text-muted'), button('Details', () => details(item)));
+        const checkLabel=node('label','Select ', 'small'); const check=node('input');check.type='checkbox';check.checked=selected.has(item.providerId+':'+item.id);check.addEventListener('change',()=>{const key=item.providerId+':'+item.id;if(check.checked)selected.set(key,item);else selected.delete(key);el('selection-count').textContent=selected.size+' selected';});checkLabel.prepend(check);body.prepend(checkLabel);
         card.append(img, body); col.append(card); results.append(col);
       }
       const errors = groups.filter(group => group.error).map(group => `${names.get(group.providerId) || group.providerId}: ${group.error}`);
@@ -111,8 +126,13 @@
     try { await api(`/api/playback/${b.dataset.action}`, {}); await refreshQueue(); } catch (error) { message(error.message); }
     finally { b.disabled = false; }
   }));
+  el('bulk-add').addEventListener('click',async()=>{
+    const b=el('bulk-add');b.disabled=true;try{if(!room()||!selected.size)throw new Error('Choose a room and select media');const target=room();const result=await api(`/api/v1/instances/${target.id}/${target.mode==='live'?'playlists':'queue'}`,{items:[...selected.values()].map(item=>({providerId:item.providerId,itemId:item.id,includeSpecials:el('include-specials').checked}))});selected.clear();el('selection-count').textContent='0 selected';message(`${result.count} item(s) added to ${target.name}`);await refreshQueue();}catch(error){message(error.message);}finally{b.disabled=false;}
+  });
+  el('target-room').addEventListener('change',()=>{offset=0;void search();void refreshQueue();});
   void (async () => {
     try {
+      rooms=await api('/api/v1/instances');for(const r of rooms)el('target-room').append(Object.assign(node('option',`${r.name} · ${r.mode}`),{value:r.id}));
       const providers = await api('/api/providers'); el('provider-status').replaceChildren();
       for (const provider of providers) {
         names.set(provider.id, provider.name); el('provider').append(Object.assign(node('option', `${provider.name} (${provider.kind})`), { value: provider.id }));

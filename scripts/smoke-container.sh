@@ -55,7 +55,12 @@ test -f "$smoke_dir/sse-ready"
 wait "$sse_pid"
 sse_pid=""
 test -f "$smoke_dir/sse-closed"
-test "$(docker inspect --format '{{.State.ExitCode}}' "$("${compose[@]}" ps -a -q streambot)")" = 0
+shutdown_exit=$(docker inspect --format '{{.State.ExitCode}}' "$("${compose[@]}" ps -a -q streambot)")
+printf 'Container shutdown exit status: %s\n' "$shutdown_exit"
+if [ "$shutdown_exit" != 0 ]; then
+  "${compose[@]}" logs --no-color streambot | sed -E 's/(pairing code.*: ).*/\1[REDACTED]/'
+  exit 1
+fi
 "${compose[@]}" start
 for _ in {1..30}; do if curl --fail --silent http://127.0.0.1:3000/healthz >/dev/null;then break;fi;sleep 1;done
 node --input-type=module - "$smoke_dir" <<'JS'

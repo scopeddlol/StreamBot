@@ -21,8 +21,8 @@ async function stop() {
   if (clean) {
     await drained;
     clearTimeout(deadline);
-  }
-  else deadline.ref();
+    process.exit(0);
+  } else deadline.ref();
 }
 process.once("SIGTERM", () => void stop());
 process.once("SIGINT", () => void stop());

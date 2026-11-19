@@ -40,7 +40,7 @@ if (platform === "win32") {
 
 const filename = determinedFilename;
 const scriptsPath = nodePath.resolve(process.cwd(), "scripts");
-const exePath = nodePath.resolve(scriptsPath, filename);
+const exePath = process.env.YTDLP_PATH || nodePath.resolve(scriptsPath, filename);
 
 function args(url: string, options: Partial<YTFlags>): string[] {
 	const optArgs: string[] = [];
@@ -88,6 +88,7 @@ function json(str: string) {
 
 export async function downloadExecutable() {
 	if (!existsSync(exePath)) {
+    if (process.env.YTDLP_PATH) throw new Error("YTDLP_PATH does not exist");
 		logger.info("yt-dlp not found, downloading...");
 		const releases = await got.get("https://api.github.com/repos/yt-dlp/yt-dlp/releases?per_page=1").json();
 		const release = releases[0];
@@ -144,7 +145,7 @@ export default async function ytdl(url: string, options: Partial<YTFlags> = {}, 
 	});
 }
 
-export async function downloadToTempFile(url: string, options: Partial<YTFlags> = {}): Promise<string> {
+export async function downloadToTempFile(url: string, options: Partial<YTFlags> = {}, signal?: AbortSignal): Promise<string> {
 	await downloadExecutable();
 
 	const tempDir = os.tmpdir();
@@ -159,6 +160,7 @@ export async function downloadToTempFile(url: string, options: Partial<YTFlags> 
 	};
 
 	const proc = spawn(exePath, args(url, downloadOptions), {
+    signal,
 		windowsHide: true,
 		stdio: ["ignore", "ignore", "pipe"]
 	});

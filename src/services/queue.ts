@@ -1,13 +1,11 @@
 import { VideoQueue, QueueItem, MediaSource } from "../types/index.js";
-import { MediaService } from "./media.js";
+import type { PlayableReference, MediaProvider } from "../providers/types.js";
 import logger from '../utils/logger.js';
 
 export class QueueService {
-	private mediaService: MediaService;
 	private queue: VideoQueue;
 
 	constructor() {
-		this.mediaService = new MediaService();
 		this.queue = {
 			items: [],
 			currentIndex: -1,
@@ -60,10 +58,18 @@ export class QueueService {
 		};
 
 		this.queue.items.push(queueItem);
-		logger.info(`Added to queue: ${title} (requested by ${requestedBy}, resolved: ${queueItem.resolved})`);
+		logger.info('Added legacy media to queue');
 
 		return queueItem;
 	}
+
+	public addProvider(provider: MediaProvider, reference: PlayableReference, title: string, requestedBy: string): QueueItem {
+    const item: QueueItem = { id: this.generateId(), type: provider.config.kind,
+      providerName: provider.config.name, reference: { ...reference }, title,
+      requestedBy, addedAt: new Date(), resolved: false };
+    this.queue.items.push(item);
+    return item;
+  }
 
 	/**
 	 * Get the next item in the queue
@@ -97,19 +103,6 @@ export class QueueService {
 			return this.queue.items[this.queue.currentIndex];
 		}
 
-		// If currentIndex is invalid, try to find a valid index
-		if (this.queue.items.length > 0) {
-			// If currentIndex is too high, set it to the last item
-			if (this.queue.currentIndex >= this.queue.items.length) {
-				this.queue.currentIndex = this.queue.items.length - 1;
-				return this.queue.items[this.queue.currentIndex];
-			}
-			// If currentIndex is negative, set it to 0
-			if (this.queue.currentIndex < 0) {
-				this.queue.currentIndex = 0;
-				return this.queue.items[this.queue.currentIndex];
-			}
-		}
 
 		return null;
 	}

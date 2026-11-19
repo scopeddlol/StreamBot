@@ -1,3 +1,4 @@
+import type { PlayableReference } from "../providers/types.js";
 export interface VideoFormat {
 	hasVideo: boolean;
 	hasAudio: boolean;
@@ -307,7 +308,7 @@ export interface MediaSource {
  	headers?: Record<string, string>;
 }
 
-export interface QueueItem {
+export interface LegacyQueueItem {
   	id: string;
   	url: string;
   	title: string;
@@ -319,6 +320,13 @@ export interface QueueItem {
   	resolved?: boolean;
   	headers?: Record<string, string>;
 }
+
+export interface ProviderQueueItem {
+  id: string; type: "jellyfin" | "silo"; providerName: string; reference: PlayableReference;
+  title: string; requestedBy: string; addedAt: Date; resolved: boolean;
+  url?: never; headers?: never; originalInput?: never; isLive?: never;
+}
+export type QueueItem = LegacyQueueItem | ProviderQueueItem;
 
 export interface VideoQueue {
   items: QueueItem[];

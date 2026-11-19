@@ -2,6 +2,7 @@ import { Message, ActivityOptions } from "discord.js-selfbot-v13";
 import config from "../config.js";
 import logger from "./logger.js";
 import fs from 'fs';
+import { redact } from './redact.js';
 
 /**
  * Shared utility functions for Discord bot operations
@@ -96,7 +97,7 @@ export const ErrorUtils = {
 		logger.error(`Error in ${context}:`, error);
 
 		if (message) {
-			await DiscordUtils.sendError(message, `An error occurred: ${error.message || 'Unknown error'}`);
+			await DiscordUtils.sendError(message, `An error occurred: ${redact(error.message || 'Unknown error')}`);
 		}
 	},
 

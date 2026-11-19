@@ -82,14 +82,14 @@ export class MediaService {
 		}
 	}
 
-	public async downloadYouTubeVideo(url: string): Promise<string | null> {
+	public async downloadYouTubeVideo(url: string, signal?: AbortSignal): Promise<string | null> {
 		try {
 			const ytDlpDownloadOptions = {
 				format: `bestvideo[height<=${config.height || 720}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${config.height || 720}]+bestaudio/best[height<=${config.height || 720}]/best`,
 				noPlaylist: true,
 			};
 
-			const tempFilePath = await downloadToTempFile(url, ytDlpDownloadOptions);
+			const tempFilePath = await downloadToTempFile(url, ytDlpDownloadOptions, signal);
 			return tempFilePath;
 		} catch (error) {
 			logger.error("Failed to download YouTube video:", error);

@@ -1,11 +1,12 @@
 import winston from 'winston';
+import { redact } from './redact.js';
 
 // Custom log format
 const logFormat = winston.format.combine(
 	winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
 	winston.format.colorize(),
 	winston.format.printf(({ level, message, timestamp }) => {
-		return `[${timestamp}] ${level}: ${message}`;
+		return `[${timestamp}] ${level}: ${redact(String(message))}`;
 	})
 );
 

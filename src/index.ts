@@ -14,10 +14,10 @@ let stopping = false;
 async function stop() {
   if (stopping) return;
   stopping = true;
-  const drained = new Promise<void>((resolve) => server.close(() => resolve()));
   const deadline = setTimeout(() => process.exit(1), 40000);
   deadline.unref();
   const clean = await runtime.shutdown();
+  const drained = new Promise<void>((resolve) => server.close(() => resolve()));
   if (clean) {
     await drained;
     clearTimeout(deadline);

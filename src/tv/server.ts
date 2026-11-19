@@ -1068,6 +1068,7 @@ export function createTVApp(runtime: TVRuntime) {
       "Cache-Control": "no-store",
     });
     res.flushHeaders();
+    res.write(": connected\n\n");
     let closed = false;
     const close = () => {
       if (closed) return;

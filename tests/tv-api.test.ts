@@ -128,6 +128,7 @@ test("shutdown ends authenticated event streams before closing SQLite", async ()
     );
     expect(response.status).toBe(200);
     const reader = response.body!.getReader();
+    await reader.read(); // Consume the initial SSE comment before testing EOF.
     await r.shutdown();
     expect((await reader.read()).done).toBe(true);
     expect(r.instances.listenerCount("shutdown")).toBe(0);

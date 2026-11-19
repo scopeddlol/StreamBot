@@ -1,352 +1,136 @@
-<div align="center">
+# StreamBot media libraries
 
-<img src="src/server/public/favicon.svg" alt="StreamBot Logo" width="400" height="120"/>
+A StreamBot fork adding Jellyfin and Silo compatibility-library browsing to the existing FFmpeg → Discord streamer. TypeScript, Bun, Express/EJS. Upstream: [ysdragon/StreamBot](https://github.com/ysdragon/StreamBot), MIT; original attribution and [LICENSE](LICENSE) retained. The [original README](docs/UPSTREAM_README.md) is historical; use this page for this fork's deployment.
 
-# StreamBot
+**Discord account risk:** StreamBot is a self-bot using a regular Discord account. Discord prohibits self-bots and may suspend the account. This is not an official Discord bot; Docker does not remove that risk. No evasion features are included.
 
-**A powerful Discord self-bot for streaming videos from multiple sources with a web management interface**
+## Current verification
 
-![GitHub release](https://img.shields.io/github/v/release/ysdragon/StreamBot)
-[![CodeFactor](https://www.codefactor.io/repository/github/ysdragon/streambot/badge)](https://www.codefactor.io/repository/github/ysdragon/streambot)
+Local TypeScript build, automated HTTP/queue/security tests, native streaming-module import, and real FFmpeg audio/video decoding of generated media through progressive/HLS gateways pass. Compose configuration validates with standalone `docker-compose` on this host. **Docker build/start remain unverified:** the local Docker VM failed a base-image COPY with a storage I/O error while the host had ~135 MiB free. No live Discord, Jellyfin or Silo credentials/instances were supplied. See [implementation notes](docs/IMPLEMENTATION_NOTES.md) and the [live checklist](docs/LIVE_VERIFICATION.md). The fork is [scopeddlol/StreamBot](https://github.com/scopeddlol/StreamBot), branch `feat/jellyfin-silo-integration`.
 
-[![Ceasefire Now](https://badge.techforpalestine.org/default)](https://techforpalestine.org/learn-more)
+## Install with Compose
 
-</div>
+Requires Docker Engine with Compose, adequate free disk (allow several GiB for native media dependencies/build layers), and network access to existing media servers and Discord. The stack builds this checkout; it does not deploy the unmodified upstream image or create media-server containers/databases.
 
-## 📑 Table of Contents
-
-- [✨ Features](#-features)
-- [📋 Requirements](#-requirements)
-- [🚀 Installation](#-installation)
-- [🎮 Usage](#-usage)
-- [🐳 Docker Setup](#-docker-setup)
-- [🎯 Commands](#-commands)
-- [⚙️ Configuration](#%EF%B8%8F-configuration)
-- [🌐 Web Interface](#-web-interface)
-- [🤝 Contributing](#-contributing)
-- [⚠️ Disclaimer](#%EF%B8%8F-disclaimer)
-- [📝 License](#-license)
-
-## ✨ Features
-
-- 📁 **Local Video Streaming**: Stream videos from your local videos folder
-- 🎬 **YouTube Integration**: Stream YouTube videos with smart search functionality
-- 📺 **YouTube Live Streams**: Direct streaming support for YouTube live content
-- 🟣 **Twitch Support**: Stream Twitch live streams and video-on-demand (VODs)
-- 🔗 **Direct URL Streaming**: Stream from any URL supported by [yt-dlp](https://github.com/yt-dlp/yt-dlp) (thousands of video sites including Vimeo, Dailymotion, Facebook, Instagram, news sites, and more)
-- 🎵 **Queue System**: Queue multiple videos with auto-play and skip functionality
-- 🌐 **Web Management Interface**: Full-featured web dashboard for video library management
-- 📤 **Video Upload**: Upload videos through the web interface or download from remote URLs
-- 🖼️ **Video Previews**: Generate and view thumbnail previews for all videos
-- ⚙️ **Runtime Configuration**: Adjust streaming parameters and bot settings during runtime
-
-## 📋 Requirements
-
-- **[Bun](https://bun.sh/) v1.1.39+** (recommended) or **[Node.js](https://nodejs.org/) v21+**
-- **[FFmpeg](https://www.ffmpeg.org/)** (the bot will attempt to install it automatically if missing, but manual installation is recommended)
-- **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** (automatically downloaded and updated by the bot)
-
-### 💡 Optional
-- 🎮 **GPU with hardware acceleration** for improved streaming performance
-- 🌐 **High-speed internet** for remote video streaming and downloads
-- 💾 **Sufficient disk space** for video storage and cache
-
-## 🚀 Installation
-
-This project is [hosted on GitHub](https://github.com/ysdragon/StreamBot).
-
-1. **Clone the repository:**
-```bash
-git clone https://github.com/ysdragon/StreamBot
-cd StreamBot
+```sh
+cp .env.example .env
+mkdir -p data/videos data/preview-cache config
+cp config/media-servers.example.json config/media-servers.json
+chmod 600 .env config/media-servers.json
 ```
 
-2. **Install dependencies:**
+Privately edit `.env` and `config/media-servers.json`:
 
-With Bun (recommended):
-```bash
-bun install
-```
+- Fill `TOKEN`, `PREFIX`, `GUILD_ID`, `COMMAND_CHANNEL_ID`, `VIDEO_CHANNEL_ID`, and `ADMIN_IDS`. Only listed admin IDs in that guild/channel can execute commands, including playback controls. Use a dedicated test account/channel for verification.
+- Set `SERVER_USERNAME`, a strong `SERVER_PASSWORD` (at least 16 characters, preferably random), and a separate random `SESSION_SECRET` (at least 32 characters). Bcrypt and Argon2 hashes are supported; single-quote values containing `$` in Compose env files. Generate random values locally with `openssl rand -hex 32`; never send them in chat or commit them.
+- Set `SERVER_PUBLIC_ORIGIN=http://localhost:3000` for the default local dashboard. All mutations, including login, require that exact browser Origin. Opening the dashboard as `127.0.0.1` requires changing this setting accordingly.
+- Set provider credentials in the environment variable names referenced by the JSON. Remove providers you do not use. `{"servers":[]}` is valid. IDs must be unique, letters/digits/underscore/hyphen, and are used by commands. More than one instance of either kind is supported.
+- The JSON file is private even though it contains only environment references: its server URLs may identify private infrastructure. Real tokens/passwords never belong in JSON. `.env`, runtime config, local data and cookies are ignored by Git and excluded from Docker build context.
 
-With npm:
-```bash
-npm install
-```
-
-3. **Configure environment:**
-   - Copy `.env.example` to `.env`
-   - Update the configuration values (see [⚙️ Configuration](#%EF%B8%8F-configuration) section)
-   - See the [wiki](https://github.com/ysdragon/StreamBot/wiki/Get-Discord-user-token) for instructions on obtaining your Discord token
-
-4. **Setup complete!** 🎉 Required directories for videos and cache will be created automatically on first run.
-
-## 🎮 Usage
-
-### 🚀 Starting the Bot
-
-**With Bun (recommended):**
-```bash
-bun run start
-```
-
-**With Node.js:**
-```bash
-npm run build
-npm run start:node
-```
-
-**With web interface enabled:**
-Set `SERVER_ENABLED=true` in your `.env` file. The web interface runs alongside the bot automatically.
-
-To run only the web interface without the bot:
-```bash
-bun run server       # With Bun
-npm run server:node  # With Node.js (after building)
-```
-
-### 📹 Video Playback
-
-All videos are played through a queue system that automatically advances to the next video when the current one ends.
-
-The `play` command automatically detects the input type:
-- 📁 Local files from your `VIDEOS_DIR`
-- 🎬 YouTube videos (by URL or search query)
-- 🟣 Twitch streams (live or VOD)
-- 🔗 Any URL supported by yt-dlp
-
-Use `ytsearch` to find YouTube videos, then `play` with the results to stream them. Use `list` to browse your local video collection.
-
-#### 🔐 Custom HTTP headers
-
-Some streams (e.g. protected `.m3u8` HLS links) require specific HTTP headers. You can pass them after the URL:
-
-```
-$play https://cdn.example.com/live/index.m3u8 --referer https://example.com/ --origin https://example.com
-$play https://cdn.example.com/video.m3u8 --user-agent "Mozilla/5.0 ..." --header "Cookie: session=abc" --header "X-Token: 123"
-```
-
-| Flag | Header |
-|------|--------|
-| `--referer <url>` | `Referer` |
-| `--origin <url>` | `Origin` |
-| `--user-agent <ua>` / `--ua <ua>` | `User-Agent` |
-| `--header "Name: Value"` | Any header (repeatable) |
-
-Wrap values containing spaces in double quotes, and use `\"` for a literal quote inside a value. Headers are supported for direct `http(s)` stream URLs (not YouTube or Twitch links) and are applied to ffmpeg and yt-dlp for that queue item (and to ffprobe when `STREAM_RESPECT_VIDEO_PARAMS` is enabled).
-
-## 🐳 Docker Setup
-
-StreamBot provides ready-to-use Docker configurations for easy deployment.
-
-### 📦 Standard Deployment
-
-1. **Create project directory:**
-```bash
-mkdir streambot && cd streambot
-```
-
-2. **Download Docker Compose configuration:**
-```bash
-wget https://raw.githubusercontent.com/ysdragon/StreamBot/main/docker-compose.yml
-```
-
-3. **Configure environment:**
-   - Edit `docker-compose.yml` to set your environment variables
-   - Ensure video storage directories are properly mounted
-
-4. **Launch StreamBot:**
-```bash
+```sh
+docker compose config --quiet
+docker compose build
 docker compose up -d
+docker compose logs --tail=100 streambot
 ```
 
-### ☁️ Cloudflare WARP Deployment
+Open [the local dashboard](http://localhost:3000/library). Log in with the configured admin credentials. The same process owns the Discord client, dashboard and playback queue; **use the default `bun start` container command for playback**. `bun run server` is a separate read-only browsing mode and reports playback unavailable.
 
-For enhanced network capabilities with Cloudflare WARP:
+The checked-in mount paths are writable local video storage and preview cache. Queue/session state is in memory, intentionally resets on restart, and introduces no database. Media files/config/cache survive restarts through the bind mounts. In Linux deployments ensure the mounted directories/config are readable (and data directories writable) by container UID/GID 1000. Do not make private config world-readable to work around permissions.
 
-1. **Download WARP configuration:**
-```bash
-wget https://raw.githubusercontent.com/ysdragon/StreamBot/main/docker-compose-warp.yml
+### Reach existing media servers
+
+Example URLs are placeholders, not deployed defaults. `localhost` inside StreamBot is the StreamBot container, not the host or media server. Use a reachable LAN/Tailscale URL, or attach this service to an existing private external Docker network and use the media server's service DNS name. For a host service on Linux, explicitly configure an appropriate host-gateway mapping if needed. This stack does not modify your server databases or media files.
+
+The provider allows only the exact configured origin (scheme, host, port). API redirects, playback redirects, HLS playlists, segments, keys and artwork must stay on that origin. Cross-origin delivery/CDN/transcode nodes are deliberately rejected; expose a trusted same-origin media reverse proxy if necessary. Server filesystem `Path` fields are never opened locally.
+
+HTTPS certificate verification stays enabled. For a private CA, mount the CA certificate read-only and set `NODE_EXTRA_CA_CERTS` to that path (verify support in your deployed Bun version); use a properly trusted server certificate. Do not disable TLS verification. Private HTTP is supported for explicitly configured trusted-network servers.
+
+### Jellyfin
+
+Use the actual API base URL, including any reverse-proxy path prefix. Configure either:
+
+1. `credentialEnv` naming an API token and `userId` identifying the intended Jellyfin viewer; or
+2. `usernameEnv` / `passwordEnv` naming an account login, with no `credentialEnv`.
+
+Server API keys may carry broad privileges; prefer a dedicated restricted viewer session/login when profile restrictions matter. The client checks identity and accessible libraries, requests item details, and uses POST `PlaybackInfo` at the front of the queue. It prefers returned direct URLs, then HLS. Jellyfin sometimes omits `DirectStreamUrl`; only after negotiation reports `SupportsDirectPlay`, this adapter uses the [documented static video route](https://github.com/jellyfin/jellyfin/blob/master/Jellyfin.Api/Controllers/VideosController.cs) with the returned media-source and session identifiers. It never substitutes an arbitrary filesystem path.
+
+### Silo
+
+Use the **actual enabled Jellyfin compatibility listener URL**, which may be a different port from Silo's native API. Do not point this adapter at `/api/v2`. Verify listener/version, the account's permitted library/profile and playback in the dashboard before streaming.
+
+The example uses `SILO_COMPAT_USERNAME=account#profile` and `SILO_COMPAT_PASSWORD` for a compatibility login. Current Silo source supports `password#pin` for PIN-protected profiles; confirm your deployed release's behavior before using it. Alternatively replace the login fields in JSON with `"credentialEnv":"SILO_COMPAT_TOKEN"` and supply a valid compatibility session token. Do not configure both modes. Login mode reauthenticates once when a compatibility credential expires.
+
+Native `Authorization: Bearer ...` and `X-Profile-Id` are not sent to compatibility endpoints. Current Silo source also resolves certain admin API keys to the owner's primary profile; this is not permission to assume any native or catalog-scoped key can play media. Prefer explicit profile compatibility login and test access. No native API fallback is implemented.
+
+References inspected: [compatibility API](https://github.com/Silo-Server/silo-server/blob/main/docs/jellycompat-api.md), [compatibility login](https://github.com/Silo-Server/silo-server/blob/main/internal/jellycompat/login.go), [API-key scope rules](https://github.com/Silo-Server/silo-server/blob/main/docs/api-keys-api.md). These describe current upstream source, not a verified installation supplied by the operator.
+
+### Dashboard security / reverse proxies
+
+Compose binds `127.0.0.1:3000`. Default HTTP cookies are HTTP-only, SameSite Strict, with an eight-hour lifetime. Login regenerates the session ID; login attempts are rate limited. Session storage is single-process memory, so logging in again after restart is expected.
+
+For TLS termination, set `SERVER_PUBLIC_ORIGIN=https://your-private-dashboard.example` and `SERVER_TRUST_PROXY` to the explicit trusted proxy IP/CIDR, or `loopback` only when the proxy really connects from loopback. This enables Secure cookies and forwarded HTTPS handling. Do not trust every source IP. A proxy in another container cannot reach a loopback-bound host port as `localhost`; attach both containers to an appropriately isolated shared network, remove the host port mapping if unnecessary, and scope trust to that proxy's address/network. Keep the UI private and authenticated.
+
+`GET /healthz` returns only `{"status":"ok"}`. This is process liveness, not a Discord/provider playback readiness claim. Provider connectivity appears separately in the authenticated source selector. No browser endpoint exposes raw media credentials or negotiated stream URLs. A random per-play loopback gateway passes source credentials only to the configured origin, proxies byte ranges, validates redirects and rewrites HLS URLs before FFmpeg sees them. Artwork is authenticated, bounded and cached only in the signed-in browser (`private`, five minutes); streams are not exposed as a dashboard download proxy.
+
+## Use
+
+The dashboard supports source/library selection, search, paginated movies/series, poster/details/runtime/codec summary, series → seasons → episodes, version selection, Play/Add to queue, and current queue/start/skip/stop. “Play” starts the queue when idle, and adds to the existing queue during playback. Errors and connectivity state appear inline. Existing local upload/preview management remains available under **Local files**. File deletion and logout now require POST.
+
+Discord examples (use your configured prefix and **provider ID**):
+
+```text
+$media servers
+$media search jellyfin-primary "The Matrix"
+$media search silo-primary "The Matrix"
+$media seasons silo-primary <series-id>
+$media episodes silo-primary <series-id> <season-id>
+$play jellyfin-primary:<movie-id>
+$play silo-primary:<episode-id>
+$queue
+$skip
+$stop
 ```
 
-2. **Configure WARP settings:**
-   - Add your WARP license key to `docker-compose-warp.yml`
-   - Update Discord token and other required environment variables
+Local names, YouTube search/URLs, Twitch, HTTP URLs, header flags and other upstream commands remain available. Queue entries for providers contain stable IDs and optional version, never signed URLs or credentials. URLs/grants resolve when playback reaches that item. Failed items report a safe error and advance; skip/stop abort preparation and streaming and close provider resources before advancing. Playback errors are visible in the dashboard even when playback was started there without a Discord Message.
 
-3. **Launch with WARP:**
-```bash
-docker compose -f docker-compose-warp.yml up -d
+FFmpeg still encodes the output required by Discord; source direct play does not guarantee zero encoding. Hardware acceleration is off by default and needs platform-specific device access/configuration. No GPU claim is made for the macOS/Colima host.
+
+## Limits and troubleshooting
+
+- **Live release compatibility is pending verification.** No real Jellyfin movie, Silo episode, Discord audio/video, or expired live session has been tested here. Record deployed versions and run the [live checklist](docs/LIVE_VERIFICATION.md).
+- Default audio only; subtitles are disabled. Track-selection requests are explicitly rejected rather than silently choosing another track. Media versions are supported when returned by item details. There is no seek/resume UI.
+- An initially expired progressive/root playlist grant is renegotiated once. Expiry of an already-running HLS child/segment fails safely; seamless midstream renewal/resume is not implemented. Requeue the item after checking server grant lifetime. Session cleanup uses `DELETE /Videos/ActiveEncodings` with DeviceId/PlaySessionId; errors are reported, and server idle cleanup may still be needed after a crash.
+- No progress or watched-state writeback is sent. Only playback negotiation and teardown mutate server session state. Silo may internally record playback history as part of its own session lifecycle.
+- Media servers on another origin, unsupported HLS constructs and malformed responses fail closed. There is no arbitrary-URL provider proxy. Existing explicit admin URL playback/local remote-upload tools remain privileged upstream capabilities; keep admin access limited.
+- `401`: replace credential or check compatibility login. `403`: account/profile/library/playback permissions. `404`: stale item/version or wrong listener/base path. `429`: bounded GET retries then an actionable error. Offline/TLS/timeout: check from inside the container; negotiation/read deadlines are bounded.
+- Playback preparation supports cancellation. Legacy metadata lookups are bounded from the controller but an underlying third-party extractor may finish its read request in the background; downloaded temporary YouTube files are cleaned and downloads receive cancellation signals.
+- Bun and npm packages are pinned by version/lockfile. Native setup downloads the locked datachannel prebuild and node-av's matching FFmpeg bundle. No `trust --all` is used; reviewed native steps live in `scripts/install-native.mjs`. OS package repositories and upstream native assets are not a fully hermetic/offline build. Audit/pin image digests and mirror native assets for stricter supply-chain requirements.
+- Linux amd64/arm64 and macOS native package availability depend on the upstream streamer. The current image build must be completed on a host with sufficient storage before production use.
+
+## Develop and verify
+
+```sh
+bun install --frozen-lockfile --ignore-scripts
+bun run setup:native
+bun run build
+bun test
 ```
 
-> ⚠️ **Note:** The web interface is not available in WARP mode because the WARP container uses network isolation that prevents external access to the web server port.
+Install FFmpeg/ffprobe and yt-dlp on PATH for host execution; set `YTDLP_PATH` to an installed executable. Docker includes pinned yt-dlp and disables auto-update. For host development, set `FFMPEG_TEST_PATH` if the test executable is elsewhere. Generated test media uses tones/color bars, with no private libraries. The tests check provider DTOs/auth/errors/paging, HLS/redirect policy, grant renewal, queue lifecycle, dashboard auth/Origin controls and command permissions. The real FFmpeg test skips explicitly if neither `/usr/bin/ffmpeg`, the native bundle, nor the configured executable is present.
 
-## 🎯 Commands
+CI builds/tests without live credentials, builds the fork image, and runs an isolated dashboard-only Compose start/restart/persistence smoke test; it does not publish to upstream registries. Both Dockerfiles use the same locked setup; the default uses Bun, while `Dockerfile.node` selects the compiled Node entry point. The Node image has not been runtime-verified here.
 
-### 📺 Playback Commands
+## Source control
 
-| Command | Description | Aliases |
-|---------|-------------|---------|
-| `play <video_name\|url\|search_query> [--referer URL] [--origin URL] [--user-agent UA] [--header "Name: Value"]` | Play local video, URL, or search YouTube videos. Header flags apply to URLs only ([details](#-custom-http-headers)) | |
-| `ytsearch <query>` | Search for videos on YouTube | |
-| `stop` | Stop current video playback and clear queue | `leave`, `s` |
-| `skip` | Skip the currently playing video | `next` |
-| `queue` | Display the current video queue | |
-| `list` | Show available local videos | |
+The implementation is on `feat/jellyfin-silo-integration` in [scopeddlol/StreamBot](https://github.com/scopeddlol/StreamBot), with `upstream` retained. To reproduce the fork workflow from an upstream-only checkout:
 
-### 🔧 Utility Commands
-
-| Command | Description | Aliases |
-|---------|-------------|---------|
-| `status` | Show current streaming status | |
-| `preview <video_name>` | Generate preview thumbnails for a video | |
-| `ping` | Check bot latency | |
-| `help` | Show available commands | |
-
-### 🛡️ Administration Commands
-
-| Command | Description | Aliases |
-|---------|-------------|---------|
-| `config [parameter] [value]` | View or adjust bot configuration parameters (Admin only) | `cfg`, `set` |
-
-## ⚙️ Configuration
-
-StreamBot is configured through environment variables in a `.env` file. Copy `.env.example` to `.env` and modify the values as needed.
-
-### 🔐 Discord Self-Bot Configuration
-
-```bash
-# Required: Your Discord self-bot token
-# See: https://github.com/ysdragon/StreamBot/wiki/Get-Discord-user-token
-TOKEN="YOUR_BOT_TOKEN_HERE"
-
-# Command prefix for bot commands
-PREFIX="$"
-
-# Discord server where the bot will operate
-GUILD_ID="YOUR_SERVER_ID"
-
-# Channel where bot will respond to commands
-COMMAND_CHANNEL_ID="COMMAND_CHANNEL_ID"
-
-# Voice/video channel where bot will stream
-VIDEO_CHANNEL_ID="VIDEO_CHANNEL_ID"
-
-# Admin user IDs - comma-separated or JSON array format
-# Examples:
-#   ADMIN_IDS="123456789,987654321"
-#   ADMIN_IDS=["123456789","987654321"]
-ADMIN_IDS=["YOUR_USER_ID_HERE"]
+```sh
+gh auth login -h github.com
+gh auth status
+gh repo fork --remote --remote-name origin
+git remote -v
+git push -u origin feat/jellyfin-silo-integration
 ```
 
-### 📁 File Management
-
-```bash
-# Directory where video files are stored
-VIDEOS_DIR="./videos"
-
-# Directory for caching video preview thumbnails
-PREVIEW_CACHE_DIR="./tmp/preview-cache"
-```
-
-### 🍪 Content Source Configuration
-
-```bash
-# Path to browser cookies for accessing private/premium content
-# Supports: YouTube Premium, age-restricted content, private videos
-YTDLP_COOKIES_PATH=""
-```
-
-### 🎥 Streaming Configuration
-
-```bash
-# Video Quality Settings
-STREAM_RESPECT_VIDEO_PARAMS="false"  # Use original video parameters if true
-STREAM_BITRATE_OVERRIDE="false"      # If true, use STREAM_BITRATE_KBPS even when respecting video params
-STREAM_WIDTH="1280"                  # Output resolution width
-STREAM_HEIGHT="720"                  # Output resolution height
-STREAM_MAX_WIDTH="0"                 # Max width cap (0 = disabled)
-STREAM_MAX_HEIGHT="0"                # Max height cap (0 = disabled)
-STREAM_FPS="30"                      # Target frame rate
-
-# Bitrate Settings (affects quality and bandwidth usage)
-STREAM_BITRATE_KBPS="2000"           # Target bitrate (higher = better quality)
-STREAM_MAX_BITRATE_KBPS="2500"       # Maximum allowed bitrate
-
-# Performance & Encoding
-STREAM_HARDWARE_ACCELERATION="false" # Use GPU acceleration if available
-STREAM_VIDEO_CODEC="H264"            # Codec: H264, H265, VP8, VP9, AV1
-
-# H.264/H.265 Encoding Preset (quality vs speed tradeoff)
-# Options: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
-STREAM_H26X_PRESET="ultrafast"
-```
-
-### 🌐 Web Interface Configuration
-
-```bash
-# Enable/disable the web management interface
-SERVER_ENABLED="false"
-
-# Web interface authentication
-SERVER_USERNAME="admin"
-SERVER_PASSWORD="admin"  # Plain text, bcrypt, or argon2 hash
-
-# Web server port
-SERVER_PORT="8080"
-```
-
-### 🍪 Using Cookies with yt-dlp
-
-To access private or premium content (like YouTube Premium videos), you can provide a cookies file:
-
-1. **Export cookies from your browser** using a browser extension:
-   - [Get cookies.txt LOCALLY](https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc) (Chromium-based browsers)
-   - [cookies.txt](https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/) (Firefox-based browsers)
-
-2. **Save the cookies file** (usually named `cookies.txt`) to a location accessible by the bot
-
-3. **Configure the path** in your `.env` file:
-   ```bash
-   YTDLP_COOKIES_PATH="./cookies.txt"
-   ```
-   Or use the config command at runtime:
-   ```
-   $config ytdlpCookiesPath ./cookies.txt
-   ```
-
-4. **Restart the bot** if you updated the `.env` file
-
-## 🌐 Web Interface
-
-When enabled (`SERVER_ENABLED="true"`), StreamBot provides a web-based management interface.
-
-### ✨ Features
-
-- 📋 **Video Library Management**: Browse your video collection with file sizes and detailed information
-- 📤 **Local File Upload**: Upload videos directly with progress tracking
-- 🌐 **Remote URL Download**: Download videos from URLs directly to your library
-- 🖼️ **Video Previews**: Generate and view thumbnail screenshots from different parts of each video
-- 🗑️ **File Management**: Delete videos from your library
-- 📊 **Video Metadata**: View detailed information (duration, resolution, codec, etc.)
-
-### 🔗 Access
-
-After enabling and restarting the bot, access the interface at `http://localhost:8080` (or your configured `SERVER_PORT`).
-
-## 🤝 Contributing
-
-Contributions are welcome! Feel free to:
-- 🐛 Report bugs via [issues](https://github.com/ysdragon/StreamBot/issues/new)
-- 🔧 Submit [pull requests](https://github.com/ysdragon/StreamBot/pulls)
-- 💡 Suggest new features
-
-## ⚠️ Disclaimer
-
-This bot may violate Discord's Terms of Service. Use at your own risk.
-
-I disavow before Allah any unethical use of this project.
-
-إبراء الذمة: أتبرأ من أي استخدام غير أخلاقي لهذا المشروع أمام الله.
-
-## 📝 License
-
-Licensed under MIT License. See [LICENSE](https://github.com/ysdragon/StreamBot/blob/main/LICENSE) for details.
+Check that the fork belongs to the intended authenticated owner; retain `upstream`. Do not commit deployment credentials/config. Full implementation and verification results are in [implementation notes](docs/IMPLEMENTATION_NOTES.md).

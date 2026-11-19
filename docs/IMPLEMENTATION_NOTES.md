@@ -4,7 +4,7 @@
 
 - Upstream: https://github.com/ysdragon/StreamBot, main at `c67f6b715c3168c21531fdaaa54f94b0b9e50fa0`.
 - Local feature branch: `feat/jellyfin-silo-integration`; upstream remote retained.
-- GitHub CLI reports an invalid token for its configured account. No fork exists from this run and nothing has been pushed. The connected GitHub tool has no fork operation.
+- The first sandboxed GitHub auth check misleadingly reported an invalid token. Rechecking with network permission confirmed scopeddlol is authenticated (repo/workflow scope); fork/push proceeded after that correction.
 - Bun 1.3.10 installed under `/private/tmp/streambot-toolchain` for verification; Node v25.6.1; Docker client 29.9.0, darwin/arm64.
 - `bun install --frozen-lockfile --ignore-scripts`: passed (358 packages). `bun run build`: passed before edits. Upstream has no test script.
 - Docker daemon unavailable: Colima socket does not exist. No live Discord or media-server credentials supplied.
@@ -26,3 +26,15 @@ Jellyfin playback controller source: https://github.com/jellyfin/jellyfin/blob/m
 +- Colima was initially stopped. Started it for the build, then stopped it after the failed attempt.
 +- Build pulled pinned Bun/Node base images but failed at Docker's COPY layer commit with storage `input/output error`, before application dependency installation. Host free space was ~135 MiB. Docker subsequently could not list/remove the two task-pulled images due to the same I/O failure. No existing volumes/files were deleted. After stopping Colima the host reported ~1.5 GiB free; insufficient headroom for reliable retries.
 +- Image build, container start/restart, volume persistence and container SIGTERM verification remain blocked by host storage. Do not claim the image is verified. Recover storage and inspect Colima health before retrying.
+
+## Implementation and local checks
++
++- `src/providers/`: registry, shared authenticated compatibility client, Jellyfin/Silo adapters, bounded HTTP errors/retries, origin validation and private per-play progressive/HLS gateway. Credentials remain backend-only; artwork uses the authenticated HTTP app.
++- `src/services/playback.ts`: application-level queue controller; `streaming.ts` retains the existing prepareStream/playStream engine behind a cancellable driver. Discriminated provider queue items store stable references. Discord and HTTP adapters share the controller without manufacturing Messages.
++- `src/server/`: EJS remote-library browser, source/library filters, details, TV navigation, version selection, queue controls. Strong dashboard configuration, session regeneration, strict cookies, Origin mutation protection and POST logout/delete. All command dispatch now requires configured guild/channel/admin authorization.
++- Provider session negotiation and ActiveEncodings teardown only; no explicit watched/progress writeback. Default audio, subtitles off. Startup root-grant renewal once; active HLS segment expiry is controlled failure, no seamless midstream resume. See README for limits.
++- `bun run build`: passes after integration. Reviewed native dependency setup completed locally; importing `@dank074/discord-video-stream` succeeds.
++- Real FFmpeg test generated one-second video+tone and decoded both mapped streams through progressive and HLS gateway transport. This does not verify real providers or Discord delivery.
++- Credentials absent: real Jellyfin/Silo versions/listeners/profiles, actual movie/episode playback, live expiry and Discord skip/stop verification remain unexecuted. Docker storage blocker is separate from these missing credentials.
+
+- Final local regression run: **27 passed, 0 failed, 99 assertions** across four test files, including real FFmpeg audio/video transport.

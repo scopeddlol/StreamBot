@@ -19,3 +19,10 @@ Commands previously passed Discord Message objects directly through streaming an
 Inspected upstream source and Silo main documentation: jellycompat-api.md, catalog-api.md, playback-api.md, auth-api.md and authentication/login handlers. Silo compatibility tokens use Jellyfin headers. Compatibility sign-in supports `username#profile` and `password#pin`; native bearer/profile headers are not substituted. Distinct media-source IDs and per-play grants must be preserved. Real deployed listener/version/profile validation remains an operator gate.
 
 Jellyfin playback controller source: https://github.com/jellyfin/jellyfin/blob/master/Jellyfin.Api/Controllers/MediaInfoController.cs . Silo contract: https://github.com/Silo-Server/silo-server/blob/main/docs/jellycompat-api.md . These moving references are not proof of compatibility with an unprovided deployment.
+
+## Container verification status
++
++- `STREAMBOT_ENV_FILE=.env.example docker-compose --env-file .env.example config --quiet`: passed. The machine has standalone Compose; `docker compose` is not registered as a CLI plugin.
++- Colima was initially stopped. Started it for the build, then stopped it after the failed attempt.
++- Build pulled pinned Bun/Node base images but failed at Docker's COPY layer commit with storage `input/output error`, before application dependency installation. Host free space was ~135 MiB. Docker subsequently could not list/remove the two task-pulled images due to the same I/O failure. No existing volumes/files were deleted. After stopping Colima the host reported ~1.5 GiB free; insufficient headroom for reliable retries.
++- Image build, container start/restart, volume persistence and container SIGTERM verification remain blocked by host storage. Do not claim the image is verified. Recover storage and inspect Colima health before retrying.

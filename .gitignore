@@ -1,4 +1,3 @@
-LICENSE
 node_modules/
 dist/
 .env
@@ -7,3 +6,10 @@ videos/
 tmp/
 *.sock
 cookies.txt
+.env.*
+!.env.example
+config/*.json
+!config/media-servers.example.json
+data/
+*.log
+scripts/yt-dlp*

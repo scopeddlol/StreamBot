@@ -1,0 +1,16 @@
+.git
+.github
+.env
+.env.*
+*.pem
+*.key
+*cookie*
+config
+!config/media-servers.example.json
+data
+videos
+tmp
+node_modules
+dist
+docs
+*.log

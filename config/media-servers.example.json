@@ -1,0 +1,20 @@
+{
+  "servers": [
+    {
+      "id": "jellyfin-primary",
+      "name": "Jellyfin",
+      "kind": "jellyfin",
+      "baseUrl": "http://jellyfin:8096",
+      "credentialEnv": "JELLYFIN_API_KEY",
+      "userId": "REPLACE_WITH_JELLYFIN_USER_ID"
+    },
+    {
+      "id": "silo-primary",
+      "name": "Silo",
+      "kind": "silo",
+      "baseUrl": "http://silo-compat:8096",
+      "usernameEnv": "SILO_COMPAT_USERNAME",
+      "passwordEnv": "SILO_COMPAT_PASSWORD"
+    }
+  ]
+}

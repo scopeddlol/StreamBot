@@ -12,7 +12,9 @@
     "build": "tsc",
     "watch": "tsc -w",
     "gen-hash": "bun src/utils/gen-hash.ts",
-    "gen-hash:node": "node dist/utils/gen-hash.js"
+    "gen-hash:node": "node dist/utils/gen-hash.js",
+    "test": "bun test",
+    "setup:native": "node scripts/install-native.mjs"
   },
   "author": "ysdragon",
   "license": "MIT",
@@ -41,5 +43,6 @@
     "@types/express-session": "^1.18.2",
     "@types/multer": "^2.1.0",
     "typescript": "^5.9.3"
-  }
+  },
+  "trustedDependencies": []
 }

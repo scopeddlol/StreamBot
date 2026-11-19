@@ -35,6 +35,7 @@ export class Auth {
     })();
   }
   session(userId: string) {
+    this.store.run('DELETE FROM sessions WHERE expires_at<? OR last_seen<?',Date.now(),Date.now()-30*60000);
     const token = randomBytes(32).toString('base64url'); this.store.run('INSERT INTO sessions VALUES(?,?,?,?)', digest(token), userId, Date.now() + 8 * 3600000, Date.now()); return token;
   }
   async login(username: unknown, password: unknown) {

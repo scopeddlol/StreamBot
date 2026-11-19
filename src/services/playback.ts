@@ -10,6 +10,10 @@ export interface PlaybackEngine {
   play(input: PlaybackInput, signal: AbortSignal): Promise<void>;
   disconnect(): Promise<void>;
 }
+export interface PlaybackTransport extends PlaybackEngine {
+  connect(guildId?:string,voiceChannelId?:string):Promise<void>;
+  capabilities():{video:boolean;audio:boolean;voiceJoin:boolean;experimental?:boolean};
+}
 export type PlaybackNotice = (event: 'playing' | 'finished' | 'error', title: string) => Promise<void>;
 
 // One worker owns advancement and teardown. skip/stop abort preparation AND

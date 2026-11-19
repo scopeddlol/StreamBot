@@ -39,7 +39,7 @@ beforeAll(() => {
       const body = await req.json();
       if (body.MediaSourceId && body.MediaSourceId !== 'version') return Response.json({ MediaSources: [] });
       return Response.json({ PlaySessionId: `session-${negotiations}`, MediaSources: mode === 'unsupported' ? [] : [{ Id: 'version', SupportsDirectPlay: true,
-        ...(mode === 'static' ? {} : { DirectStreamUrl: mode === 'evil' ? 'http://127.0.0.1:1/private' : mode === 'hls' || mode === 'evil-hls' ? '/master.m3u8' : `/stream?grant=${negotiations}` }) }] });
+        ...(mode === 'static' ? {} : { DirectStreamUrl: mode === 'evil' ? 'http://127.0.0.1:1/private' : mode === 'hls-redirect' ? '/redirect-playlist' : mode === 'hls' || mode === 'evil-hls' ? '/master.m3u8' : `/stream?grant=${negotiations}` }) }] });
     }
     if (url.pathname === '/Videos/ActiveEncodings') { stopped++; return new Response(null, { status: 204 }); }
     if (url.pathname === '/stream') {
@@ -47,9 +47,10 @@ beforeAll(() => {
       if (mode === 'redirect') return new Response(null, { status: 302, headers: { Location: 'http://127.0.0.1:1/private' } });
       const range = req.headers.get('range'); return new Response('video-audio', { status: range ? 206 : 200, headers: { 'content-type': 'video/mp4', ...(range ? { 'content-range': 'bytes 0-10/11' } : {}) } });
     }
-    if (url.pathname === '/master.m3u8') return new Response(mode === 'evil-hls' ? '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="http://127.0.0.1:1/private"\n' : '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nchild.m3u8\n', { headers: { 'content-type': 'application/vnd.apple.mpegurl' } });
-    if (url.pathname === '/child.m3u8') return new Response('#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key?secret=grant"\n#EXTINF:1,\nsegment.ts?secret=grant\n#EXT-X-ENDLIST\n', { headers: { 'content-type': 'application/vnd.apple.mpegurl' } });
-    if (url.pathname === '/key' || url.pathname === '/segment.ts') return new Response('segment', { headers: { 'content-type': 'video/mp2t' } });
+    if (url.pathname === '/redirect-playlist') return new Response(null, { status: 302, headers: { Location: '/nested/master.m3u8' } });
+    if (url.pathname.endsWith('/master.m3u8')) return new Response(mode === 'evil-hls' ? '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="http://127.0.0.1:1/private"\n' : '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nchild.m3u8\n', { headers: { 'content-type': 'application/vnd.apple.mpegurl' } });
+    if (url.pathname.endsWith('/child.m3u8')) return new Response('#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key?secret=grant"\n#EXTINF:1,\nsegment.ts?secret=grant\n#EXT-X-ENDLIST\n', { headers: { 'content-type': 'application/vnd.apple.mpegurl' } });
+    if (url.pathname.endsWith('/key') || url.pathname.endsWith('/segment.ts')) return new Response('segment', { headers: { 'content-type': 'video/mp2t' } });
     if (url.pathname.includes('/Videos/')) return new Response('video-audio');
     return new Response('', { status: 404 });
   } });
@@ -112,8 +113,8 @@ describe('provider contracts', () => {
     try { expect(await (await fetch(stream.inputUrl)).text()).toBe('video-audio'); }
     finally { await stream.close(); mode = 'normal'; }
   });
-  test('HLS master, child manifest, keys and segments stay behind gateway', async () => {
-    mode = 'hls'; const stream = await provider('silo').resolvePlayback({ providerId: 'silo', itemId: 'episode' });
+  for (const hlsMode of ['hls', 'hls-redirect']) test(`HLS master, child manifest, keys and segments stay behind gateway (${hlsMode})`, async () => {
+    mode = hlsMode; const stream = await provider('silo').resolvePlayback({ providerId: 'silo', itemId: 'episode' });
     try {
       const master = await (await fetch(stream.inputUrl)).text();
       expect(master).not.toContain(base); const childUrl = master.trim().split('\n').pop()!;

@@ -6,7 +6,7 @@ A StreamBot fork adding Jellyfin and Silo compatibility-library browsing to the 
 
 ## Current verification
 
-Local TypeScript build, automated HTTP/queue/security tests, native streaming-module import, and real FFmpeg audio/video decoding of generated media through progressive/HLS gateways pass. Compose configuration validates with standalone `docker-compose` on this host. **Docker build/start remain unverified:** the local Docker VM failed a base-image COPY with a storage I/O error while the host had ~135 MiB free. No live Discord, Jellyfin or Silo credentials/instances were supplied. See [implementation notes](docs/IMPLEMENTATION_NOTES.md) and the [live checklist](docs/LIVE_VERIFICATION.md). The fork is [scopeddlol/StreamBot](https://github.com/scopeddlol/StreamBot), branch `feat/jellyfin-silo-integration`.
+Local TypeScript build, automated HTTP/queue/security tests, native streaming-module import, and real FFmpeg audio/video decoding of generated media through progressive/HLS gateways pass. [Fork CI](https://github.com/scopeddlol/StreamBot/actions/runs/44460057666) also passed the Linux amd64 Docker build, native import, toolchain checks, and isolated dashboard-only Compose start/restart/persistent-mount smoke test. The local Docker build encountered host storage I/O errors and was stopped; container checks ran on GitHub instead. No live Discord, Jellyfin or Silo credentials/instances were supplied. See [implementation notes](docs/IMPLEMENTATION_NOTES.md) and the [live checklist](docs/LIVE_VERIFICATION.md). The fork is [scopeddlol/StreamBot](https://github.com/scopeddlol/StreamBot), branch `feat/jellyfin-silo-integration`.
 
 ## Install with Compose
 
@@ -106,7 +106,7 @@ FFmpeg still encodes the output required by Discord; source direct play does not
 - `401`: replace credential or check compatibility login. `403`: account/profile/library/playback permissions. `404`: stale item/version or wrong listener/base path. `429`: bounded GET retries then an actionable error. Offline/TLS/timeout: check from inside the container; negotiation/read deadlines are bounded.
 - Playback preparation supports cancellation. Legacy metadata lookups are bounded from the controller but an underlying third-party extractor may finish its read request in the background; downloaded temporary YouTube files are cleaned and downloads receive cancellation signals.
 - Bun and npm packages are pinned by version/lockfile. Native setup downloads the locked datachannel prebuild and node-av's matching FFmpeg bundle. No `trust --all` is used; reviewed native steps live in `scripts/install-native.mjs`. OS package repositories and upstream native assets are not a fully hermetic/offline build. Audit/pin image digests and mirror native assets for stricter supply-chain requirements.
-- Linux amd64/arm64 and macOS native package availability depend on the upstream streamer. The current image build must be completed on a host with sufficient storage before production use.
+- Linux amd64/arm64 and macOS native package availability depend on the upstream streamer. Linux amd64 image build/start is verified in fork CI. Linux arm64 image execution and GPU acceleration remain unverified; rebuild on a healthy host with adequate storage before production use.
 
 ## Develop and verify
 

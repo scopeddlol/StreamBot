@@ -49,6 +49,7 @@ export async function openGateway(base: URL, root: URL, headers: () => Record<st
       }
       clearTimeout(timeout);
       if (!response.ok) { await response.body?.cancel(); res.writeHead(response.status).end(); return; }
+      current = allowedUrl(response.url || current.href, base);
       const contentType = response.headers.get('content-type') || '';
       const manifest = /mpegurl/i.test(contentType) || /\.m3u8$/i.test(current.pathname);
       if (manifest && req.method !== 'HEAD') {

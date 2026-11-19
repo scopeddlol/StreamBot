@@ -25,7 +25,7 @@ Jellyfin playback controller source: https://github.com/jellyfin/jellyfin/blob/m
 +- `STREAMBOT_ENV_FILE=.env.example docker-compose --env-file .env.example config --quiet`: passed. The machine has standalone Compose; `docker compose` is not registered as a CLI plugin.
 +- Colima was initially stopped. Started it for the build, then stopped it after the failed attempt.
 +- Build pulled pinned Bun/Node base images but failed at Docker's COPY layer commit with storage `input/output error`, before application dependency installation. Host free space was ~135 MiB. Docker subsequently could not list/remove the two task-pulled images due to the same I/O failure. No existing volumes/files were deleted. After stopping Colima the host reported ~1.5 GiB free; insufficient headroom for reliable retries.
-+- Image build, container start/restart, volume persistence and container SIGTERM verification remain blocked by host storage. Do not claim the image is verified. Recover storage and inspect Colima health before retrying.
++- Local image build/start checks are blocked by host storage. Recover storage and inspect Colima health before local retry. Subsequent GitHub CI successfully performed image build and dashboard-only start/restart/mount checks (see below); this does not establish live Discord cleanup.
 
 ## Implementation and local checks
 +
@@ -37,4 +37,11 @@ Jellyfin playback controller source: https://github.com/jellyfin/jellyfin/blob/m
 +- Real FFmpeg test generated one-second video+tone and decoded both mapped streams through progressive and HLS gateway transport. This does not verify real providers or Discord delivery.
 +- Credentials absent: real Jellyfin/Silo versions/listeners/profiles, actual movie/episode playback, live expiry and Discord skip/stop verification remain unexecuted. Docker storage blocker is separate from these missing credentials.
 
-- Final local regression run: **27 passed, 0 failed, 99 assertions** across four test files, including real FFmpeg audio/video transport.
+- Final local regression run: **28 passed, 0 failed, 103 assertions** across four test files, including real FFmpeg audio/video transport.
+
+## Fork and remote container verification
+
+- Fork: https://github.com/scopeddlol/StreamBot; branch `feat/jellyfin-silo-integration`, upstream retained and branch pushed.
+- CI https://github.com/scopeddlol/StreamBot/actions/runs/44460057666 passed at `2f0fd14`: locked install, build/tests, Linux amd64 image build, native streaming import, Bun/FFmpeg/ffprobe/yt-dlp checks, isolated dashboard-only Compose start, restart, persistent video/cache/config mounts, and shutdown. No image was published to upstream registries.
+- Follow-up regression fix resolves HLS children relative to the final allowlisted redirect URL, with a dedicated nested-manifest test. Build and complete suite rerun before push; latest branch CI tracks the final revision.
+- Live Discord output, real Jellyfin/Silo content/profile behavior, prolonged grant expiry, real FFmpeg SIGTERM during Discord playback, Linux arm64 container execution, and GPU behavior remain unverified. These require operator infrastructure; use LIVE_VERIFICATION.md. Full production acceptance is conditional on those checks.

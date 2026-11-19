@@ -13,3 +13,5 @@ config/*.json
 data/
 *.log
 scripts/yt-dlp*
+
+.DS_Store

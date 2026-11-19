@@ -7,10 +7,9 @@ test("worker crash leaves dashboard/runtime and other playback alive, preserving
       b = instance(r, 1);
     r.playlists.add(a.id, [{ title: "crash", local: "fixture" }], "owner");
     r.playlists.add(b.id, [{ title: "hang", local: "fixture" }], "owner");
-    await Promise.allSettled([
-      r.instances.start(a.id),
-      r.instances.start(b.id),
-    ]);
+    await r.instances.start(b.id);
+    await until(() => r.instances.get(b.id).state === "streaming");
+    await r.instances.start(a.id);
     await until(() => r.instances.get(a.id).state === "failed");
     expect(r.instances.get(b.id).state).toBe("streaming");
     expect(r.playlists.queue(a.id)[0].status).toBe("playing");

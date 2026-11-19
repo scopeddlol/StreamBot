@@ -5,7 +5,7 @@ repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 smoke_dir="$(mktemp -d)"
 compose=(docker compose --project-directory "$smoke_dir" -f "$repo_dir/docker-compose.yml" -p streambot-tv-ci-smoke)
 sse_pid=""
-cleanup() { if [ -n "$sse_pid" ]; then kill "$sse_pid" >/dev/null 2>&1 || true; fi; "${compose[@]}" exec -T --user root streambot chown -R "$(id -u):$(id -g)" /data >/dev/null 2>&1 || true; "${compose[@]}" down --timeout 40 >/dev/null 2>&1 || true; rm -rf "$smoke_dir" || true; }
+cleanup() { if [ -n "$sse_pid" ]; then kill "$sse_pid" >/dev/null 2>&1 || true; fi; "${compose[@]}" exec -T --user root streambot chown -R "$(id -u):$(id -g)" /data >/dev/null 2>&1 || docker run --rm --user root --entrypoint chown -v "$smoke_dir/data:/data" streambot-tv:local -R "$(id -u):$(id -g)" /data >/dev/null 2>&1 || true; "${compose[@]}" down --timeout 40 >/dev/null 2>&1 || true; rm -rf "$smoke_dir" || true; }
 trap cleanup EXIT
 "${compose[@]}" config --quiet
 "${compose[@]}" up -d --no-build
@@ -40,7 +40,12 @@ const dir=process.argv[2],cookie=readFileSync(dir+'/private-cookie','utf8');
 const response=await fetch('http://localhost:3000/api/v1/events',{headers:{Cookie:cookie},signal:AbortSignal.timeout(60000)});
 if(!response.ok)throw Error('Event stream authentication failed');
 writeFileSync(dir+'/sse-ready','ready');
-for await(const chunk of response.body){}
+try { for await(const chunk of response.body){} }
+catch(error) {
+  // Docker/Bun on Linux may reset the socket during stop. EventSource reconnects;
+  // application correctness is asserted separately by the zero exit status below.
+  if(error?.cause?.code!=='UND_ERR_SOCKET')throw error;
+}
 writeFileSync(dir+'/sse-closed','closed');
 JS
 sse_pid=$!

@@ -41,7 +41,7 @@ The canonical Compose file contains exactly one application service, `streambot`
 /data/cache/          writable runtime cache
 ```
 
-The image filesystem is read-only, `/tmp` is bounded scratch space, and the host port binds only to `127.0.0.1:3000`. No Docker socket, privileged mode or media-server database is mounted. The entrypoint briefly initializes application-directory ownership, using only CHOWN/SETUID/SETGID/DAC_OVERRIDE capabilities, then immediately runs Bun and workers as UID/GID **1000** without effective capabilities. It does not recursively change ownership of your media libraries. The non-root process is checked by the container smoke test. Host Docker administrators can still access the container; this does not protect against a compromised host.
+The image filesystem is read-only, `/tmp` is bounded scratch space, and the host port binds only to `127.0.0.1:3000`. No Docker socket, privileged mode or media-server database is mounted. The entrypoint briefly initializes application-directory ownership, using only CHOWN/SETUID/SETGID/DAC_OVERRIDE capabilities for initialization and KILL for the root init process to forward signals, then immediately runs Bun and workers as UID/GID **1000** without effective capabilities. It does not recursively change ownership of your media libraries. The non-root process is checked by the container smoke test. Host Docker administrators can still access the container; this does not protect against a compromised host.
 
 For native development:
 

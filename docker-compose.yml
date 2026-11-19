@@ -18,9 +18,10 @@ services:
       - /tmp:size=1G,mode=1777
     cap_drop:
       - ALL
-    # Directory initialization and immediate privilege drop only; Bun runs as UID 1000.
+    # Initialization, privilege drop and tini signal forwarding; Bun runs as UID 1000.
     cap_add:
       - CHOWN
+      - KILL
       - SETUID
       - SETGID
       - DAC_OVERRIDE

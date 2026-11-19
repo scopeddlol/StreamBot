@@ -40,12 +40,7 @@ const dir=process.argv[2],cookie=readFileSync(dir+'/private-cookie','utf8');
 const response=await fetch('http://localhost:3000/api/v1/events',{headers:{Cookie:cookie},signal:AbortSignal.timeout(60000)});
 if(!response.ok)throw Error('Event stream authentication failed');
 writeFileSync(dir+'/sse-ready','ready');
-try { for await(const chunk of response.body){} }
-catch(error) {
-  // Docker/Bun on Linux may reset the socket during stop. EventSource reconnects;
-  // application correctness is asserted separately by the zero exit status below.
-  if(error?.cause?.code!=='UND_ERR_SOCKET')throw error;
-}
+for await(const chunk of response.body){}
 writeFileSync(dir+'/sse-closed','closed');
 JS
 sse_pid=$!

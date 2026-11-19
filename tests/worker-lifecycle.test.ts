@@ -1,4 +1,84 @@
-import {test,expect} from 'bun:test';import {fixture,instance,until} from './tv-helpers.js';
-test('worker crash leaves dashboard/runtime and other playback alive, preserving interrupted checkpoint',async()=>{const{runtime:r,cleanup}=fixture();try{const a=instance(r,0),b=instance(r,1);r.playlists.add(a.id,[{title:'crash',local:'fixture'}],'owner');r.playlists.add(b.id,[{title:'hang',local:'fixture'}],'owner');await Promise.allSettled([r.instances.start(a.id),r.instances.start(b.id)]);await until(()=>r.instances.get(a.id).state==='failed');expect(r.instances.get(b.id).state).toBe('streaming');expect(r.playlists.queue(a.id)[0].status).toBe('playing');expect(r.store.get('SELECT count(*) AS n FROM instances').n).toBe(2);await r.instances.stop(b.id);expect(r.instances.get(b.id).state).toBe('stopped');}finally{await cleanup();}},10000);
-test('skips advance exactly once; stop preserves pending queue for restart',async()=>{const{runtime:r,cleanup}=fixture();try{const a=instance(r);r.playlists.add(a.id,[{title:'hang',local:'a'},{title:'hang',local:'b'}],'owner');await r.instances.start(a.id);await until(()=>r.instances.get(a.id).state==='streaming');const first=r.instances.get(a.id).current.id;await r.instances.skip(a.id);await until(()=>r.instances.get(a.id).current?.id!==first&&r.instances.get(a.id).state==='streaming');expect(r.playlists.queue(a.id)).toHaveLength(1);await r.instances.stop(a.id);expect(r.playlists.queue(a.id)).toHaveLength(1);await r.instances.start(a.id);await until(()=>r.instances.get(a.id).state==='streaming');}finally{await cleanup();}},10000);
-test('two active room queues stay isolated when one skips and stops',async()=>{const{runtime:r,cleanup}=fixture();try{const a=instance(r,0),b=instance(r,1);r.playlists.add(a.id,[{title:'hang',local:'a'},{title:'hang',local:'a2'}],'a');r.playlists.add(b.id,[{title:'hang',local:'b'}],'b');await Promise.all([r.instances.start(a.id),r.instances.start(b.id)]);await until(()=>r.instances.get(a.id).state==='streaming'&&r.instances.get(b.id).state==='streaming');const bCurrent=r.instances.get(b.id).current.id;await r.instances.skip(a.id);await until(()=>r.playlists.queue(a.id).length===1);expect(r.instances.get(b.id).current.id).toBe(bCurrent);await r.instances.stop(a.id);expect(r.instances.get(b.id).state).toBe('streaming');expect(r.playlists.queue(b.id)).toHaveLength(1);}finally{await cleanup();}},10000);
+import { test, expect } from "bun:test";
+import { fixture, instance, until } from "./tv-helpers.js";
+test("worker crash leaves dashboard/runtime and other playback alive, preserving interrupted checkpoint", async () => {
+  const { runtime: r, cleanup } = fixture();
+  try {
+    const a = instance(r, 0),
+      b = instance(r, 1);
+    r.playlists.add(a.id, [{ title: "crash", local: "fixture" }], "owner");
+    r.playlists.add(b.id, [{ title: "hang", local: "fixture" }], "owner");
+    await Promise.allSettled([
+      r.instances.start(a.id),
+      r.instances.start(b.id),
+    ]);
+    await until(() => r.instances.get(a.id).state === "failed");
+    expect(r.instances.get(b.id).state).toBe("streaming");
+    expect(r.playlists.queue(a.id)[0].status).toBe("playing");
+    expect(r.store.get("SELECT count(*) AS n FROM instances").n).toBe(2);
+    await r.instances.stop(b.id);
+    expect(r.instances.get(b.id).state).toBe("stopped");
+  } finally {
+    await cleanup();
+  }
+}, 10000);
+test("skips advance exactly once; stop preserves pending queue for restart", async () => {
+  const { runtime: r, cleanup } = fixture();
+  try {
+    const a = instance(r);
+    r.playlists.add(
+      a.id,
+      [
+        { title: "hang", local: "a" },
+        { title: "hang", local: "b" },
+      ],
+      "owner",
+    );
+    await r.instances.start(a.id);
+    await until(() => r.instances.get(a.id).state === "streaming");
+    const first = r.instances.get(a.id).current.id;
+    await r.instances.skip(a.id);
+    await until(
+      () =>
+        r.instances.get(a.id).current?.id !== first &&
+        r.instances.get(a.id).state === "streaming",
+    );
+    expect(r.playlists.queue(a.id)).toHaveLength(1);
+    await r.instances.stop(a.id);
+    expect(r.playlists.queue(a.id)).toHaveLength(1);
+    await r.instances.start(a.id);
+    await until(() => r.instances.get(a.id).state === "streaming");
+  } finally {
+    await cleanup();
+  }
+}, 10000);
+test("two active room queues stay isolated when one skips and stops", async () => {
+  const { runtime: r, cleanup } = fixture();
+  try {
+    const a = instance(r, 0),
+      b = instance(r, 1);
+    r.playlists.add(
+      a.id,
+      [
+        { title: "hang", local: "a" },
+        { title: "hang", local: "a2" },
+      ],
+      "a",
+    );
+    r.playlists.add(b.id, [{ title: "hang", local: "b" }], "b");
+    await Promise.all([r.instances.start(a.id), r.instances.start(b.id)]);
+    await until(
+      () =>
+        r.instances.get(a.id).state === "streaming" &&
+        r.instances.get(b.id).state === "streaming",
+    );
+    const bCurrent = r.instances.get(b.id).current.id;
+    await r.instances.skip(a.id);
+    await until(() => r.playlists.queue(a.id).length === 1);
+    expect(r.instances.get(b.id).current.id).toBe(bCurrent);
+    await r.instances.stop(a.id);
+    expect(r.instances.get(b.id).state).toBe("streaming");
+    expect(r.playlists.queue(b.id)).toHaveLength(1);
+  } finally {
+    await cleanup();
+  }
+}, 10000);

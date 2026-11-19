@@ -1,126 +1,1198 @@
-import express, { Request, Response, NextFunction } from 'express';
-import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import { randomUUID } from 'node:crypto';import multer from 'multer';import { isIP } from 'node:net';
-import config from '../config.js';
-import { TVRuntime } from './runtime.js';import { AppError, fields, publicError, text, integer, snowflake } from './errors.js';import { Action, Actor, actions } from './permissions.js';
-import { sameOrigin } from '../server/middleware/security.js';
-import { mediaRoutes } from '../server/routes/media-library.js';import dashboardRoutes from '../server/routes/dashboard.js';import previewRoutes from '../server/routes/preview.js';
-import { stringify, prettySize } from '../server/utils/helpers.js';
+import express, { Request, Response, NextFunction } from "express";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { randomUUID } from "node:crypto";
+import multer from "multer";
+import { isIP } from "node:net";
+import config from "../config.js";
+import { TVRuntime } from "./runtime.js";
+import {
+  AppError,
+  fields,
+  publicError,
+  text,
+  integer,
+  snowflake,
+} from "./errors.js";
+import { Action, Actor, actions } from "./permissions.js";
+import { sameOrigin } from "../server/middleware/security.js";
+import { mediaRoutes } from "../server/routes/media-library.js";
+import dashboardRoutes from "../server/routes/dashboard.js";
+import previewRoutes from "../server/routes/preview.js";
+import { stringify, prettySize } from "../server/utils/helpers.js";
 
-type Req=Request&{actor:Actor;sessionToken?:string};
-const localOrigin=(value:string)=>['localhost','127.0.0.1','[::1]'].includes(new URL(value).hostname);
-export function createTVApp(runtime:TVRuntime){
-  const app=express(),{store,auth,instances,providers,policy,playlists}=runtime;
-  const origin=()=>store.setting('dashboard-origin','http://localhost:3000');
-  const cookies=(res:Response,token:string,clear=false)=>res.cookie('streambot.tv',token,{httpOnly:true,sameSite:'strict',secure:new URL(origin()).protocol==='https:',maxAge:clear?0:8*3600000,path:'/'});
-  const token=(req:Request)=>{const value=req.headers.cookie?.split(';').map(p=>p.trim()).find(p=>p.startsWith('streambot.tv='))?.slice(13);return value&&/^[A-Za-z0-9_-]{43}$/.test(value)?value:undefined;};
-  app.disable('x-powered-by');app.set('view engine','ejs');app.set('views',path.join(process.cwd(),'src/server/views'));
-  const proxy=store.setting('trusted-proxy','');if(proxy)app.set('trust proxy',proxy);
-  app.use((_req,res,next)=>{res.set({'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'same-origin','Cache-Control':'no-store','Content-Security-Policy':"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'"});next();});
-  app.get('/healthz',(_req,res)=>res.json({status:'ok'}));
-  app.use((req,res,next)=>{if(!['GET','HEAD','OPTIONS'].includes(req.method)&&(req.get('origin')!==origin()||req.get('sec-fetch-site')==='cross-site')){next(new AppError('ORIGIN_REJECTED','Request origin rejected',403));return;}sameOrigin(origin())(req,res,next);});
-  app.use('/api/v1/backups/import',express.json({limit:'32mb'}));app.use(express.json({limit:'256kb'}));app.use(express.urlencoded({extended:false,limit:'32kb'}));
-  app.use((req,res,next)=>{if(!['GET','HEAD','OPTIONS'].includes(req.method)&&!req.secure&&!localOrigin(origin())){res.status(403).json({code:'HTTPS_REQUIRED',message:'Use HTTPS for non-local administration'});return;}next();});
-  app.get('/api/v1/bootstrap/status',(_req,res)=>res.json({initialized:auth.hasOwner()}));
-  app.post('/api/v1/bootstrap/renew',(req,res)=>{if(auth.hasOwner()||!localOrigin(origin())||!['localhost','127.0.0.1','::1','[::1]'].includes(req.hostname))throw new AppError('LOCAL_PAIRING_ONLY','Local unclaimed setup only',403);auth.throttle(`renew:${req.ip}`,1);auth.renewPairing();res.json({message:'Pairing code is available in local container logs; expired codes were renewed.'});});
-  app.post('/api/v1/bootstrap/claim',async(req,res)=>{
-    auth.throttle(`claim:${req.ip}`,5);fields(req.body,['code','username','password','rightsAccepted']);
-    if(!localOrigin(origin())||!['localhost','127.0.0.1','::1','[::1]'].includes(req.hostname))throw new AppError('LOCAL_PAIRING_ONLY','Claim the first administrator through localhost or a local SSH tunnel',403);
-    if(req.body.rightsAccepted!==true)throw new AppError('RIGHTS_REQUIRED','Confirm that you will broadcast only content you are authorized to share');
-    const session=await auth.claim(req.body.code,req.body.username,req.body.password);cookies(res,session);res.status(201).json({user:auth.user(session)});
-  });
-  app.post('/api/v1/auth/login',async(req,res)=>{fields(req.body,['username','password']);auth.throttle(`login-ip:${req.ip}`,20);auth.throttle(`login-user:${String(req.body.username).slice(0,80)}`,10);const session=await auth.login(req.body.username,req.body.password);cookies(res,session);res.json({user:auth.user(session)});});
-  app.get(['/','/setup','/login','/instances','/live','/requests','/connections','/permissions','/ai','/system'],(_req,res)=>res.render('pages/tv',{}));
-  app.use('/tv',express.static(path.join(process.cwd(),'src/server/public/tv')));
-  app.use((req:Request,res,next)=>{const sessionToken=token(req);const user=auth.user(sessionToken);if(!user){if(req.path.startsWith('/api/'))res.status(401).json({code:'AUTH_REQUIRED',message:'Sign in to continue'});else res.redirect('/login');return;}(req as Req).actor={...user,source:'web'};(req as Req).sessionToken=sessionToken;next();});
-  const route=(method:'get'|'post'|'patch'|'put'|'delete',url:string,action:Action|undefined,handler:(req:Req,res:Response)=>any,scoped=false)=>{
-    app[method](url,async(req,res)=>{const r=req as Req;if(action)policy.require(r.actor,action,scoped?String(req.params.id):undefined);if(method!=='get')auth.throttle(`mutation:${r.actor.id}:${action||url}`,60);const output=await handler(r,res);if(!res.headersSent)res.json(output===undefined?{ok:true}:output);if(method!=='get'){store.audit(r.actor.id,action||url,String(req.params.id||'global'));runtime.instances.emit('change');}});
+type Req = Request & { actor: Actor; sessionToken?: string };
+const localOrigin = (value: string) =>
+  ["localhost", "127.0.0.1", "[::1]"].includes(new URL(value).hostname);
+export function createTVApp(runtime: TVRuntime) {
+  const app = express(),
+    { store, auth, instances, providers, policy, playlists } = runtime;
+  const origin = () =>
+    store.setting("dashboard-origin", "http://localhost:3000");
+  const cookies = (res: Response, token: string, clear = false) =>
+    res.cookie("streambot.tv", token, {
+      httpOnly: true,
+      sameSite: "strict",
+      secure: new URL(origin()).protocol === "https:",
+      maxAge: clear ? 0 : 8 * 3600000,
+      path: "/",
+    });
+  const token = (req: Request) => {
+    const value = req.headers.cookie
+      ?.split(";")
+      .map((p) => p.trim())
+      .find((p) => p.startsWith("streambot.tv="))
+      ?.slice(13);
+    return value && /^[A-Za-z0-9_-]{43}$/.test(value) ? value : undefined;
   };
-  route('get','/api/v1/auth/me',undefined,req=>({user:req.actor,actions:actions.filter(a=>policy.allowed(req.actor,a))}));
-  route('post','/api/v1/auth/logout',undefined,(req,res)=>{auth.logout(req.sessionToken!);cookies(res,'',true);return{ok:true};});
-  route('post','/api/v1/auth/password',undefined,async req=>{fields(req.body,['currentPassword','password']);const row=store.get('SELECT * FROM users WHERE id=?',req.actor.id);const verificationSession=await auth.login(row.username,req.body.currentPassword);auth.logout(verificationSession);const hash=await auth.passwordHash(req.body.password);store.db.transaction(()=>{store.run('UPDATE users SET password_hash=? WHERE id=?',hash,req.actor.id);store.run('DELETE FROM sessions WHERE user_id=?',req.actor.id);})();return{signedOut:true};});
-  route('post','/api/v1/auth/revoke-sessions',undefined,req=>{store.run('DELETE FROM sessions WHERE user_id=?',req.actor.id);return{signedOut:true};});
-  route('get','/api/v1/instances',undefined,req=>instances.list().filter(i=>policy.allowed(req.actor,'instance.view',i.id)));
-  route('post','/api/v1/instances','instance.create',req=>instances.save(req.body));
-  route('get','/api/v1/instances/:id','instance.view',req=>instances.get(String(req.params.id)),true);
-  route('patch','/api/v1/instances/:id','instance.configure',req=>instances.save(req.body,String(req.params.id)),true);
-  route('delete','/api/v1/instances/:id','instance.delete',req=>instances.remove(String(req.params.id),req.body.confirm===true),true);
-  route('post','/api/v1/instances/:id/duplicate','instance.create',req=>{policy.require(req.actor,'instance.configure',String(req.params.id));return instances.duplicate(String(req.params.id));},true);
-  for(const [name,action]of [['start','instance.start'],['stop','instance.stop'],['restart','instance.start'],['connect','instance.move'],['skip','queue.skip']] as const)route('post',`/api/v1/instances/:id/${name}`,action,async req=>{await instances[name](String(req.params.id));return instances.get(String(req.params.id));},true);
-  route('get','/api/v1/instances/:id/queue','queue.view',req=>({items:playlists.queue(String(req.params.id)),revision:store.setting('queue-revision:'+String(req.params.id),0),checkpoint:store.get('SELECT * FROM playback_checkpoints WHERE instance_id=?',String(req.params.id))}),true);
-  route('post','/api/v1/instances/:id/queue','queue.add',async req=>{fields(req.body,['items','playNow']);const id=String(req.params.id);if(req.body.playNow)policy.require(req.actor,'media.play_now',id);if(!Array.isArray(req.body.items)||req.body.items.length<1||req.body.items.length>500)throw new AppError('BATCH_LIMIT','Choose 1–500 selections');let sources:any[]=[];for(const input of req.body.items){policy.require(req.actor,'media.search',id);sources.push(...await playlists.expand(input,id));if(sources.length>2000)throw new AppError('BATCH_LIMIT','Expanded selection exceeds 2,000 items');}const ids=playlists.add(id,sources,req.actor.id);if(req.body.playNow){policy.require(req.actor,'media.play_now',id);store.db.transaction(()=>{const playing=store.get("SELECT position FROM queue_items WHERE instance_id=? AND status='playing'",id);ids.forEach((item,index)=>store.run('UPDATE queue_items SET position=? WHERE id=?',-ids.length+index+(playing?-10000:0),item));})();if(instances.get(id).current)await instances.skip(id);}await instances.pump(id);return{ids,count:ids.length};},true);
-  route('post','/api/v1/instances/:id/queue/clear','queue.clear',async req=>{if(req.body.confirm!==true)throw new AppError('CONFIRM_REQUIRED','Confirm clearing this queue');const id=String(req.params.id);store.run("DELETE FROM queue_items WHERE instance_id=? AND status!='playing'",id);if(instances.get(id).current)await instances.skip(id);return{ok:true};},true);
-  route('patch','/api/v1/instances/:id/queue/order','queue.reorder',req=>{const id=String(req.params.id),rows=playlists.queue(id);fields(req.body,['order','revision']);if(req.body.revision!==store.setting('queue-revision:'+id,0))throw new AppError('CONFLICT','Queue changed; refresh before reordering',409);if(!Array.isArray(req.body.order)||req.body.order.length!==rows.length||new Set(req.body.order).size!==rows.length||rows.some(r=>!req.body.order.includes(r.id)))throw new AppError('INVALID_ORDER','Include every queue item exactly once');store.db.transaction(()=>{req.body.order.forEach((key:string,index:number)=>store.run('UPDATE queue_items SET position=? WHERE id=? AND instance_id=?',index,key,id));store.set('queue-revision:'+id,store.setting('queue-revision:'+id,0)+1);})();return playlists.queue(id);},true);
-  route('get','/api/v1/instances/:id/playlists','queue.view',req=>playlists.playlist(String(req.params.id)),true);
-  route('post','/api/v1/instances/:id/playlists','playlist.manage',async req=>{fields(req.body,['items']);if(!Array.isArray(req.body.items)||req.body.items.length>500)throw new AppError('BATCH_LIMIT','Choose at most 500 selections');let sources:any[]=[];for(const input of req.body.items)sources.push(...await playlists.expand(input,String(req.params.id)));const ids=playlists.add(String(req.params.id),sources,req.actor.id,true);void instances.pump(String(req.params.id));return{count:ids.length,playlist:playlists.playlist(String(req.params.id))};},true);
-  route('patch','/api/v1/instances/:id/playlists','playlist.manage',req=>playlists.edit(String(req.params.id),req.body),true);
-  route('get','/api/v1/instances/:id/saved-playlists','queue.view',req=>playlists.saved(String(req.params.id)),true);
-  route('post','/api/v1/instances/:id/playlists/duplicate','playlist.manage',req=>playlists.duplicate(String(req.params.id),req.body.name),true);
-  route('post','/api/v1/instances/:id/playlists/select','playlist.manage',req=>{if(!['stopped','disabled','failed'].includes(instances.get(String(req.params.id)).state))throw new AppError('STOP_FIRST','Stop the instance before changing its active saved playlist',409);return playlists.select(String(req.params.id),text(req.body.playlistId,'playlist ID'));},true);
-  route('get','/api/v1/instances/:id/playlists/export','playlist.manage',req=>playlists.exportReferences(String(req.params.id)),true);
-  route('post','/api/v1/instances/:id/playlists/import','playlist.manage',async req=>{fields(req.body,['format','name','repeat','shuffle','items','excludedPrivateInputs']);if(req.body.format!=='streambot-playlist-v1'||!Array.isArray(req.body.items)||req.body.items.length>2000)throw new AppError('INVALID_PLAYLIST','Invalid reference-only playlist');let sources:any[]=[];for(const input of req.body.items)sources.push(...await playlists.expand(input,String(req.params.id)));const ids=playlists.add(String(req.params.id),sources,req.actor.id,true);return{count:ids.length};},true);
-  route('get','/api/v1/providers','integrations.manage',()=>providers.list());
-  route('post','/api/v1/providers','integrations.manage',async req=>{const result=await providers.save(req.body);instances.refreshProviders();return result;});
-  route('patch','/api/v1/providers/:id','integrations.manage',async req=>{const result=await providers.save(req.body,String(req.params.id));instances.refreshProviders();return result;});
-  route('delete','/api/v1/providers/:id','integrations.manage',req=>{if(req.body.confirm!==true)throw new AppError('CONFIRM_REQUIRED','Confirm provider removal');providers.remove(String(req.params.id));instances.refreshProviders();});
-  route('post','/api/v1/providers/:id/test','integrations.manage',req=>providers.registry.get(String(req.params.id)).healthCheck());
-  route('get','/api/v1/media/search',undefined,req=>runtime.catalog.search(req.actor,String(req.query.q||'').slice(0,300),typeof req.query.room==='string'?req.query.room:undefined,{provider:req.query.provider,kind:req.query.kind,offset:req.query.offset,library:req.query.library}));
-  route('get','/api/v1/media/:provider/items/:item',undefined,req=>runtime.catalog.provider(req.actor,String(req.params.provider),req.query.room as string).getItem(String(req.params.item)));
-  for(const kind of ['seasons','episodes','libraries','artwork'])route('get',`/api/v1/media/:provider/items/:item/${kind}`,undefined,async(req,res)=>{const provider=runtime.catalog.provider(req.actor,String(req.params.provider),req.query.room as string);if(kind==='seasons')return provider.getSeasons(String(req.params.item));if(kind==='episodes')return provider.getEpisodes(String(req.params.item),req.query.season as string);if(kind==='libraries')return provider.libraries();const image=await provider.artwork(String(req.params.item));const chunks:Uint8Array[]=[];let size=0;for await(const chunk of image.body!){size+=chunk.length;if(size>5*1024*1024)throw new AppError('IMAGE_LIMIT','Artwork exceeds size limit');chunks.push(chunk);}res.type(image.headers.get('content-type')!).send(Buffer.concat(chunks));});
-  route('get','/api/v1/instances/:id/request-policy','instance.configure',req=>JSON.parse(store.get('SELECT config FROM request_policies WHERE instance_id=?',String(req.params.id))?.config||'{}'),true);
-  route('put','/api/v1/instances/:id/request-policy','instance.configure',req=>{fields(req.body,['approval','requireVoice','cooldownSeconds','dailyLimit','maxItemsPerRequest','dailyItems']);if(typeof req.body.approval!=='boolean'||typeof req.body.requireVoice!=='boolean')throw new AppError('INVALID_POLICY','Invalid request policy');const value={approval:req.body.approval,requireVoice:req.body.requireVoice,cooldownSeconds:integer(req.body.cooldownSeconds,0,3600,15),dailyLimit:integer(req.body.dailyLimit,1,1000,30),maxItemsPerRequest:integer(req.body.maxItemsPerRequest,1,2000,100),dailyItems:integer(req.body.dailyItems,1,10000,500)};store.run('INSERT INTO request_policies VALUES(?,?) ON CONFLICT(instance_id) DO UPDATE SET config=excluded.config',String(req.params.id),JSON.stringify(value));return value;},true);
-  route('get','/api/v1/requests',undefined,req=>store.all('SELECT * FROM requests ORDER BY created_at DESC LIMIT 200').filter(row=>row.actor===req.actor.id||policy.allowed(req.actor,'requests.approve',row.instance_id)).map(row=>({...row,source:JSON.parse(row.source)})));
-  route('post','/api/v1/requests',undefined,req=>runtime.requests.submit(req.actor,text(req.body.instanceId,'room'),req.body.selection,req.body.confirm===true));
-  route('post','/api/v1/requests/:id/:decision',undefined,req=>{if(!['approve','reject','cancel'].includes(String(req.params.decision)))throw new AppError('INVALID_DECISION','Invalid decision');return runtime.requests.decide(req.actor,String(req.params.id),req.params.decision as any);});
-  route('get','/api/v1/permissions','permissions.manage',()=>({actions,rules:store.all('SELECT * FROM permission_rules'),users:store.all('SELECT id,username,role FROM users')}));
-  route('post','/api/v1/permissions','permissions.manage',req=>{fields(req.body,['guildId','instanceId','subjectType','subjectId','action','effect']);const b=req.body;if(!actions.includes(b.action)||!['allow','deny'].includes(b.effect)||!['user','role','guild'].includes(b.subjectType))throw new AppError('INVALID_RULE','Invalid permission rule');if(b.instanceId&&!store.get('SELECT id FROM instances WHERE id=?',b.instanceId))throw new AppError('INVALID_ROOM','Room not found');const id=randomUUID();store.run('INSERT INTO permission_rules VALUES(?,?,?,?,?,?,?)',id,b.guildId?snowflake(b.guildId):null,b.instanceId||null,b.subjectType,text(b.subjectId,'subject ID',80),b.action,b.effect);return{id};});
-  route('delete','/api/v1/permissions/:id','permissions.manage',req=>{store.run('DELETE FROM permission_rules WHERE id=?',String(req.params.id));});
-  route('post','/api/v1/users','permissions.manage',async req=>{fields(req.body,['username','password','role']);if(req.actor.role!=='owner')throw new AppError('OWNER_REQUIRED','Only the owner may create web administrators',403);if(!['admin','operator','viewer'].includes(req.body.role))throw new AppError('INVALID_ROLE','Choose admin, operator or viewer');const id=randomUUID();store.run('INSERT INTO users VALUES(?,?,?,?,?)',id,text(req.body.username,'username',80),await auth.passwordHash(req.body.password),req.body.role,Date.now());return{id};});
-  route('get','/api/v1/applications','integrations.manage',()=>runtime.discord.list());
-  route('post','/api/v1/applications','integrations.manage',req=>runtime.discord.save(req.body));
-  route('patch','/api/v1/applications/:id','integrations.manage',req=>runtime.discord.save(req.body,String(req.params.id)));
-  for(const name of ['start','stop','remove']as const)route('post',`/api/v1/applications/:id/${name}`,'integrations.manage',req=>{if(name==='remove'&&req.body.confirm!==true)throw new AppError('CONFIRM_REQUIRED','Confirm application removal');return runtime.discord[name](String(req.params.id));});
-  route('get','/api/v1/applications/:id/guilds','integrations.manage',req=>runtime.discord.destinations(String(req.params.id)));
-  route('post','/api/v1/providers/:id/revoke','secrets.rotate',async req=>{policy.require(req.actor,'integrations.manage');if(req.body.confirm!==true)throw new AppError('CONFIRM_REQUIRED','Confirm credential revocation and stopping affected playback');await instances.drainProvider(String(req.params.id));providers.revoke(String(req.params.id));instances.refreshProviders();});
-  route('post','/api/v1/instances/:id/revoke','secrets.rotate',async req=>{policy.require(req.actor,'instance.configure',String(req.params.id));if(req.body.confirm!==true)throw new AppError('CONFIRM_REQUIRED','Confirm stopping this instance and revoking its credential');await instances.stop(String(req.params.id));const row=store.get('SELECT secret_id FROM instances WHERE id=?',String(req.params.id));store.db.transaction(()=>{store.run('UPDATE instances SET secret_id=NULL,revision=revision+1 WHERE id=?',String(req.params.id));if(row.secret_id)store.run('DELETE FROM secret_records WHERE id=? AND owner=?',row.secret_id,String(req.params.id));})();});
-  route('get','/api/v1/secrets','secrets.rotate',()=>store.all('SELECT id,purpose,owner,updated_at FROM secret_records').map(row=>({...row,inUse:!!(store.get('SELECT id FROM instances WHERE secret_id=?',row.id)||store.get('SELECT id FROM media_providers WHERE secret_id=?',row.id)||store.get('SELECT id FROM discord_applications WHERE secret_id=?',row.id)||store.get('SELECT id FROM ai_settings WHERE secret_id=?',row.id)||store.all('SELECT source FROM playlist_entries UNION ALL SELECT source FROM queue_items').some(s=>JSON.parse(s.source).inputSecretId===row.id))})));
-  route('delete','/api/v1/secrets/:id','secrets.rotate',req=>{if(req.body.confirm!==true)throw new AppError('CONFIRM_REQUIRED','Confirm deleting this unused encrypted credential');const id=String(req.params.id);if(store.get('SELECT id FROM instances WHERE secret_id=?',id)||store.get('SELECT id FROM media_providers WHERE secret_id=?',id)||store.get('SELECT id FROM discord_applications WHERE secret_id=?',id)||store.get('SELECT id FROM ai_settings WHERE secret_id=?',id)||store.all('SELECT source FROM playlist_entries UNION ALL SELECT source FROM queue_items').some(s=>JSON.parse(s.source).inputSecretId===id))throw new AppError('SECRET_IN_USE','Revoke this credential through its connection/instance first',409);store.run('DELETE FROM secret_records WHERE id=?',id);});
-  route('get','/api/v1/ai','ai.configure',()=>runtime.ai.settings());
-  route('put','/api/v1/ai','ai.configure',req=>runtime.ai.save(req.body));
-  route('post','/api/v1/ai/recommend',undefined,req=>runtime.ai.recommend(req.actor,req.body.description,text(req.body.instanceId,'room')));
-  route('get','/api/v1/settings','integrations.manage',()=>({origin:origin(),trustedProxy:store.setting('trusted-proxy',''),sourceOrigins:store.setting('source-origins',[]),limits:store.setting('limits',{maxWorkers:8,maxFfmpeg:8,maxWorkerRSSMB:1024})}));
-  route('put','/api/v1/settings','integrations.manage',req=>{
-    fields(req.body,['origin','trustedProxy','maxWorkers','maxFfmpeg','maxWorkerRSSMB','sourceOrigins']);
-    const nextOrigin=req.body.origin||origin();const u=new URL(nextOrigin);if(nextOrigin!==u.origin||!['http:','https:'].includes(u.protocol)||u.username||u.password||u.protocol==='http:'&&!localOrigin(u.origin))throw new AppError('INVALID_ORIGIN','Choose localhost HTTP or an HTTPS origin');
-    const proxy=req.body.trustedProxy===undefined?store.setting('trusted-proxy',''):String(req.body.trustedProxy);
-    if(proxy&&proxy!=='loopback')for(const part of proxy.split(',')){const bitsParts=part.trim().split('/');const[ip,prefix]=bitsParts;const bits=isIP(ip)===4?32:isIP(ip)===6?128:0;if(bitsParts.length>2||!bits||prefix!==undefined&&(!/^\d+$/.test(prefix)||Number(prefix)<1||Number(prefix)>bits))throw new AppError('INVALID_PROXY','Choose an explicit proxy IP/CIDR or loopback');}
-    const origins=req.body.sourceOrigins??store.setting('source-origins',[]);if(!Array.isArray(origins)||origins.length>100)throw new AppError('INVALID_ORIGINS','Choose at most 100 direct-media origins');for(const value of origins){const source=new URL(value);if(source.origin!==value||!['http:','https:'].includes(source.protocol)||source.username||source.password)throw new AppError('INVALID_ORIGIN','Use exact HTTP(S) direct-media origins');}
-    const limits={maxWorkers:integer(req.body.maxWorkers,1,64,8),maxFfmpeg:integer(req.body.maxFfmpeg,1,64,8),maxWorkerRSSMB:integer(req.body.maxWorkerRSSMB,64,16384,1024)};
-    app.set('trust proxy',proxy||false);store.db.transaction(()=>{store.set('dashboard-origin',nextOrigin);store.set('trusted-proxy',proxy);store.set('source-origins',origins);store.set('limits',limits);})();return{saved:true};
+  app.disable("x-powered-by");
+  app.set("view engine", "ejs");
+  app.set("views", path.join(process.cwd(), "src/server/views"));
+  const proxy = store.setting("trusted-proxy", "");
+  if (proxy) app.set("trust proxy", proxy);
+  app.use((_req, res, next) => {
+    res.set({
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "same-origin",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy":
+        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'",
+    });
+    next();
   });
-  route('get','/api/v1/system','system.logs',()=>({version:'StreamBot TV',uid:process.getuid?.(),rss:process.memoryUsage().rss,cpu:process.cpuUsage(),load:os.loadavg(),workers:instances.list().map(i=>({id:i.id,state:i.state,metrics:i.metrics,error:i.error})),migrations:store.all('SELECT * FROM schema_migrations'),gpu:{deviceExposed:fs.existsSync('/dev/dri'),softwareDefault:true}}));
-  route('get','/api/v1/audit','system.logs',()=>store.all('SELECT * FROM audit_events ORDER BY created_at DESC LIMIT 200'));
-  route('post','/api/v1/vault/rotate','secrets.rotate',()=>{runtime.vault.rotate();});
-  route('post','/api/v1/backups/export','system.backup',req=>runtime.backups.export(req.body.passphrase));
-  route('post','/api/v1/backups/import','system.backup',async req=>{if(req.actor.role!=='owner')throw new AppError('OWNER_REQUIRED','Only the owner may replace the database',403);if(instances.list().some(i=>!['stopped','disabled','failed'].includes(i.state))||runtime.discord.list().some(a=>a.connected))throw new AppError('STOP_FIRST','Stop all workers and command connections before importing a backup',409);runtime.backups.import(req.body.backup,req.body.passphrase,req.body.confirm===true);providers.refresh();return{signedOut:true};});
-  route('post','/api/v1/migration/upload','integrations.manage',req=>{fields(req.body,['environment','config','confirm','createInstance']);return runtime.migration.upload(req.body.environment,req.body.config,req.body.confirm===true,req.body.createInstance===true);});
-  route('get','/api/v1/migration','integrations.manage',()=>runtime.migration.summary());
-  route('post','/api/v1/migration','integrations.manage',req=>{if(req.body.confirm!==true)throw new AppError('CONFIRM_REQUIRED','Review the migration summary and confirm first');return runtime.migration.run(req.body.createInstance===true);});
-  route('get','/api/v1/events',undefined,(req,res)=>{policy.require(req.actor,'instance.view');res.set({'Content-Type':'text/event-stream','Connection':'keep-alive','Cache-Control':'no-store'});res.flushHeaders();const send=()=>{if(!auth.user(req.sessionToken)){res.end();return;}res.write('event: refresh\ndata: {}\n\n');};runtime.instances.on('change',send);const timer=setInterval(send,15000);req.on('close',()=>{clearInterval(timer);runtime.instances.off('change',send);});});
+  app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
+  app.use((req, res, next) => {
+    if (
+      !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
+      (req.get("origin") !== origin() ||
+        req.get("sec-fetch-site") === "cross-site")
+    ) {
+      next(new AppError("ORIGIN_REJECTED", "Request origin rejected", 403));
+      return;
+    }
+    sameOrigin(origin())(req, res, next);
+  });
+  app.use("/api/v1/backups/import", express.json({ limit: "32mb" }));
+  app.use(express.json({ limit: "256kb" }));
+  app.use(express.urlencoded({ extended: false, limit: "32kb" }));
+  app.use((req, res, next) => {
+    if (
+      !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
+      !req.secure &&
+      !localOrigin(origin())
+    ) {
+      res.status(403).json({
+        code: "HTTPS_REQUIRED",
+        message: "Use HTTPS for non-local administration",
+      });
+      return;
+    }
+    next();
+  });
+  app.get("/api/v1/bootstrap/status", (_req, res) =>
+    res.json({ initialized: auth.hasOwner() }),
+  );
+  app.post("/api/v1/bootstrap/renew", (req, res) => {
+    if (
+      auth.hasOwner() ||
+      !localOrigin(origin()) ||
+      !["localhost", "127.0.0.1", "::1", "[::1]"].includes(req.hostname)
+    )
+      throw new AppError(
+        "LOCAL_PAIRING_ONLY",
+        "Local unclaimed setup only",
+        403,
+      );
+    auth.throttle(`renew:${req.ip}`, 1);
+    auth.renewPairing();
+    res.json({
+      message:
+        "Pairing code is available in local container logs; expired codes were renewed.",
+    });
+  });
+  app.post("/api/v1/bootstrap/claim", async (req, res) => {
+    auth.throttle(`claim:${req.ip}`, 5);
+    fields(req.body, ["code", "username", "password", "rightsAccepted"]);
+    if (
+      !localOrigin(origin()) ||
+      !["localhost", "127.0.0.1", "::1", "[::1]"].includes(req.hostname)
+    )
+      throw new AppError(
+        "LOCAL_PAIRING_ONLY",
+        "Claim the first administrator through localhost or a local SSH tunnel",
+        403,
+      );
+    if (req.body.rightsAccepted !== true)
+      throw new AppError(
+        "RIGHTS_REQUIRED",
+        "Confirm that you will broadcast only content you are authorized to share",
+      );
+    const session = await auth.claim(
+      req.body.code,
+      req.body.username,
+      req.body.password,
+    );
+    cookies(res, session);
+    res.status(201).json({ user: auth.user(session) });
+  });
+  app.post("/api/v1/auth/login", async (req, res) => {
+    fields(req.body, ["username", "password"]);
+    auth.throttle(`login-ip:${req.ip}`, 20);
+    auth.throttle(`login-user:${String(req.body.username).slice(0, 80)}`, 10);
+    const session = await auth.login(req.body.username, req.body.password);
+    cookies(res, session);
+    res.json({ user: auth.user(session) });
+  });
+  app.get(
+    [
+      "/",
+      "/setup",
+      "/login",
+      "/instances",
+      "/live",
+      "/requests",
+      "/connections",
+      "/permissions",
+      "/ai",
+      "/system",
+    ],
+    (_req, res) => res.render("pages/tv", {}),
+  );
+  app.use(
+    "/tv",
+    express.static(path.join(process.cwd(), "src/server/public/tv")),
+  );
+  app.use((req: Request, res, next) => {
+    const sessionToken = token(req);
+    const user = auth.user(sessionToken);
+    if (!user) {
+      if (req.path.startsWith("/api/"))
+        res
+          .status(401)
+          .json({ code: "AUTH_REQUIRED", message: "Sign in to continue" });
+      else res.redirect("/login");
+      return;
+    }
+    (req as Req).actor = { ...user, source: "web" };
+    (req as Req).sessionToken = sessionToken;
+    next();
+  });
+  const route = (
+    method: "get" | "post" | "patch" | "put" | "delete",
+    url: string,
+    action: Action | undefined,
+    handler: (req: Req, res: Response) => any,
+    scoped = false,
+  ) => {
+    app[method](url, async (req, res) => {
+      const r = req as Req;
+      if (action)
+        policy.require(
+          r.actor,
+          action,
+          scoped ? String(req.params.id) : undefined,
+        );
+      if (method !== "get")
+        auth.throttle(`mutation:${r.actor.id}:${action || url}`, 60);
+      const output = await handler(r, res);
+      if (!res.headersSent)
+        res.json(output === undefined ? { ok: true } : output);
+      if (method !== "get") {
+        store.audit(
+          r.actor.id,
+          action || url,
+          String(req.params.id || "global"),
+        );
+        runtime.instances.emit("change");
+      }
+    });
+  };
+  route("get", "/api/v1/auth/me", undefined, (req) => ({
+    user: req.actor,
+    actions: actions.filter((a) => policy.allowed(req.actor, a)),
+  }));
+  route("post", "/api/v1/auth/logout", undefined, (req, res) => {
+    auth.logout(req.sessionToken!);
+    cookies(res, "", true);
+    return { ok: true };
+  });
+  route("post", "/api/v1/auth/password", undefined, async (req) => {
+    fields(req.body, ["currentPassword", "password"]);
+    const row = store.get("SELECT * FROM users WHERE id=?", req.actor.id);
+    const verificationSession = await auth.login(
+      row.username,
+      req.body.currentPassword,
+    );
+    auth.logout(verificationSession);
+    const hash = await auth.passwordHash(req.body.password);
+    store.db.transaction(() => {
+      store.run(
+        "UPDATE users SET password_hash=? WHERE id=?",
+        hash,
+        req.actor.id,
+      );
+      store.run("DELETE FROM sessions WHERE user_id=?", req.actor.id);
+    })();
+    return { signedOut: true };
+  });
+  route("post", "/api/v1/auth/revoke-sessions", undefined, (req) => {
+    store.run("DELETE FROM sessions WHERE user_id=?", req.actor.id);
+    return { signedOut: true };
+  });
+  route("get", "/api/v1/instances", undefined, (req) =>
+    instances
+      .list()
+      .filter((i) => policy.allowed(req.actor, "instance.view", i.id)),
+  );
+  route("post", "/api/v1/instances", "instance.create", (req) =>
+    instances.save(req.body),
+  );
+  route(
+    "get",
+    "/api/v1/instances/:id",
+    "instance.view",
+    (req) => instances.get(String(req.params.id)),
+    true,
+  );
+  route(
+    "patch",
+    "/api/v1/instances/:id",
+    "instance.configure",
+    (req) => instances.save(req.body, String(req.params.id)),
+    true,
+  );
+  route(
+    "delete",
+    "/api/v1/instances/:id",
+    "instance.delete",
+    (req) => instances.remove(String(req.params.id), req.body.confirm === true),
+    true,
+  );
+  route(
+    "post",
+    "/api/v1/instances/:id/duplicate",
+    "instance.create",
+    (req) => {
+      policy.require(req.actor, "instance.configure", String(req.params.id));
+      return instances.duplicate(String(req.params.id));
+    },
+    true,
+  );
+  for (const [name, action] of [
+    ["start", "instance.start"],
+    ["stop", "instance.stop"],
+    ["restart", "instance.start"],
+    ["connect", "instance.move"],
+    ["disconnect", "instance.move"],
+    ["skip", "queue.skip"],
+  ] as const)
+    route(
+      "post",
+      `/api/v1/instances/:id/${name}`,
+      action,
+      async (req) => {
+        await instances[name](String(req.params.id));
+        return instances.get(String(req.params.id));
+      },
+      true,
+    );
+  route(
+    "get",
+    "/api/v1/instances/:id/logs",
+    "system.logs",
+    (req) => {
+      policy.require(req.actor, "instance.view", String(req.params.id));
+      return store.all(
+        "SELECT * FROM audit_events WHERE target=? ORDER BY created_at DESC LIMIT 100",
+        String(req.params.id),
+      );
+    },
+    true,
+  );
+  route(
+    "get",
+    "/api/v1/instances/:id/queue",
+    "queue.view",
+    (req) => ({
+      items: playlists.queue(String(req.params.id)),
+      revision: store.setting("queue-revision:" + String(req.params.id), 0),
+      checkpoint: store.get(
+        "SELECT * FROM playback_checkpoints WHERE instance_id=?",
+        String(req.params.id),
+      ),
+    }),
+    true,
+  );
+  route(
+    "post",
+    "/api/v1/instances/:id/queue",
+    "queue.add",
+    async (req) => {
+      fields(req.body, ["items", "playNow"]);
+      const id = String(req.params.id);
+      if (req.body.playNow) policy.require(req.actor, "media.play_now", id);
+      if (
+        !Array.isArray(req.body.items) ||
+        req.body.items.length < 1 ||
+        req.body.items.length > 500
+      )
+        throw new AppError("BATCH_LIMIT", "Choose 1–500 selections");
+      let sources: any[] = [];
+      for (const input of req.body.items) {
+        policy.require(req.actor, "media.search", id);
+        sources.push(...(await playlists.expand(input, id)));
+        if (sources.length > 2000)
+          throw new AppError(
+            "BATCH_LIMIT",
+            "Expanded selection exceeds 2,000 items",
+          );
+      }
+      const ids = playlists.add(id, sources, req.actor.id);
+      if (req.body.playNow) {
+        policy.require(req.actor, "media.play_now", id);
+        store.db.transaction(() => {
+          const playing = store.get(
+            "SELECT position FROM queue_items WHERE instance_id=? AND status='playing'",
+            id,
+          );
+          ids.forEach((item, index) =>
+            store.run(
+              "UPDATE queue_items SET position=? WHERE id=?",
+              -ids.length + index + (playing ? -10000 : 0),
+              item,
+            ),
+          );
+        })();
+        if (instances.get(id).current) await instances.skip(id);
+      }
+      await instances.pump(id);
+      return { ids, count: ids.length };
+    },
+    true,
+  );
+  route(
+    "post",
+    "/api/v1/instances/:id/queue/clear",
+    "queue.clear",
+    async (req) => {
+      if (req.body.confirm !== true)
+        throw new AppError("CONFIRM_REQUIRED", "Confirm clearing this queue");
+      const id = String(req.params.id);
+      store.run(
+        "DELETE FROM queue_items WHERE instance_id=? AND status!='playing'",
+        id,
+      );
+      if (instances.get(id).current) await instances.skip(id);
+      return { ok: true };
+    },
+    true,
+  );
+  route(
+    "patch",
+    "/api/v1/instances/:id/queue/order",
+    "queue.reorder",
+    (req) => {
+      const id = String(req.params.id),
+        rows = playlists.queue(id);
+      fields(req.body, ["order", "revision"]);
+      if (req.body.revision !== store.setting("queue-revision:" + id, 0))
+        throw new AppError(
+          "CONFLICT",
+          "Queue changed; refresh before reordering",
+          409,
+        );
+      if (
+        !Array.isArray(req.body.order) ||
+        req.body.order.length !== rows.length ||
+        new Set(req.body.order).size !== rows.length ||
+        rows.some((r) => !req.body.order.includes(r.id))
+      )
+        throw new AppError(
+          "INVALID_ORDER",
+          "Include every queue item exactly once",
+        );
+      store.db.transaction(() => {
+        req.body.order.forEach((key: string, index: number) =>
+          store.run(
+            "UPDATE queue_items SET position=? WHERE id=? AND instance_id=?",
+            index,
+            key,
+            id,
+          ),
+        );
+        store.set(
+          "queue-revision:" + id,
+          store.setting("queue-revision:" + id, 0) + 1,
+        );
+      })();
+      return playlists.queue(id);
+    },
+    true,
+  );
+  route(
+    "get",
+    "/api/v1/instances/:id/playlists",
+    "queue.view",
+    (req) => playlists.playlist(String(req.params.id)),
+    true,
+  );
+  route(
+    "post",
+    "/api/v1/instances/:id/playlists",
+    "playlist.manage",
+    async (req) => {
+      fields(req.body, ["items"]);
+      if (!Array.isArray(req.body.items) || req.body.items.length > 500)
+        throw new AppError("BATCH_LIMIT", "Choose at most 500 selections");
+      let sources: any[] = [];
+      for (const input of req.body.items)
+        sources.push(...(await playlists.expand(input, String(req.params.id))));
+      const ids = playlists.add(
+        String(req.params.id),
+        sources,
+        req.actor.id,
+        true,
+      );
+      void instances.pump(String(req.params.id));
+      return {
+        count: ids.length,
+        playlist: playlists.playlist(String(req.params.id)),
+      };
+    },
+    true,
+  );
+  route(
+    "patch",
+    "/api/v1/instances/:id/playlists",
+    "playlist.manage",
+    (req) => playlists.edit(String(req.params.id), req.body),
+    true,
+  );
+  route(
+    "get",
+    "/api/v1/instances/:id/saved-playlists",
+    "queue.view",
+    (req) => playlists.saved(String(req.params.id)),
+    true,
+  );
+  route(
+    "post",
+    "/api/v1/instances/:id/playlists/duplicate",
+    "playlist.manage",
+    (req) => playlists.duplicate(String(req.params.id), req.body.name),
+    true,
+  );
+  route(
+    "post",
+    "/api/v1/instances/:id/playlists/select",
+    "playlist.manage",
+    (req) => {
+      if (
+        !["stopped", "disabled", "failed"].includes(
+          instances.get(String(req.params.id)).state,
+        )
+      )
+        throw new AppError(
+          "STOP_FIRST",
+          "Stop the instance before changing its active saved playlist",
+          409,
+        );
+      return playlists.select(
+        String(req.params.id),
+        text(req.body.playlistId, "playlist ID"),
+      );
+    },
+    true,
+  );
+  route(
+    "get",
+    "/api/v1/instances/:id/playlists/export",
+    "playlist.manage",
+    (req) => playlists.exportReferences(String(req.params.id)),
+    true,
+  );
+  route(
+    "post",
+    "/api/v1/instances/:id/playlists/import",
+    "playlist.manage",
+    async (req) => {
+      fields(req.body, [
+        "format",
+        "name",
+        "repeat",
+        "shuffle",
+        "items",
+        "excludedPrivateInputs",
+      ]);
+      if (
+        req.body.format !== "streambot-playlist-v1" ||
+        !Array.isArray(req.body.items) ||
+        req.body.items.length > 2000
+      )
+        throw new AppError(
+          "INVALID_PLAYLIST",
+          "Invalid reference-only playlist",
+        );
+      let sources: any[] = [];
+      for (const input of req.body.items)
+        sources.push(...(await playlists.expand(input, String(req.params.id))));
+      const ids = playlists.add(
+        String(req.params.id),
+        sources,
+        req.actor.id,
+        true,
+      );
+      return { count: ids.length };
+    },
+    true,
+  );
+  route("get", "/api/v1/providers", "integrations.manage", () =>
+    providers.list(),
+  );
+  route("post", "/api/v1/providers", "integrations.manage", async (req) => {
+    const result = await providers.save(req.body);
+    instances.refreshProviders();
+    return result;
+  });
+  route(
+    "patch",
+    "/api/v1/providers/:id",
+    "integrations.manage",
+    async (req) => {
+      const result = await providers.save(req.body, String(req.params.id));
+      instances.refreshProviders();
+      return result;
+    },
+  );
+  route("delete", "/api/v1/providers/:id", "integrations.manage", (req) => {
+    if (req.body.confirm !== true)
+      throw new AppError("CONFIRM_REQUIRED", "Confirm provider removal");
+    providers.remove(String(req.params.id));
+    instances.refreshProviders();
+  });
+  route("post", "/api/v1/providers/:id/test", "integrations.manage", (req) =>
+    providers.registry.get(String(req.params.id)).healthCheck(),
+  );
+  route("get", "/api/v1/media/search", undefined, (req) =>
+    runtime.catalog.search(
+      req.actor,
+      String(req.query.q || "").slice(0, 300),
+      typeof req.query.room === "string" ? req.query.room : undefined,
+      {
+        provider: req.query.provider,
+        kind: req.query.kind,
+        offset: req.query.offset,
+        library: req.query.library,
+      },
+    ),
+  );
+  route("get", "/api/v1/media/:provider/items/:item", undefined, (req) =>
+    runtime.catalog
+      .provider(
+        req.actor,
+        String(req.params.provider),
+        req.query.room as string,
+      )
+      .getItem(String(req.params.item)),
+  );
+  for (const kind of ["seasons", "episodes", "libraries", "artwork"])
+    route(
+      "get",
+      `/api/v1/media/:provider/items/:item/${kind}`,
+      undefined,
+      async (req, res) => {
+        const provider = runtime.catalog.provider(
+          req.actor,
+          String(req.params.provider),
+          req.query.room as string,
+        );
+        if (kind === "seasons")
+          return provider.getSeasons(String(req.params.item));
+        if (kind === "episodes")
+          return provider.getEpisodes(
+            String(req.params.item),
+            req.query.season as string,
+          );
+        if (kind === "libraries") return provider.libraries();
+        const image = await provider.artwork(String(req.params.item));
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        for await (const chunk of image.body!) {
+          size += chunk.length;
+          if (size > 5 * 1024 * 1024)
+            throw new AppError("IMAGE_LIMIT", "Artwork exceeds size limit");
+          chunks.push(chunk);
+        }
+        res
+          .type(image.headers.get("content-type")!)
+          .send(Buffer.concat(chunks));
+      },
+    );
+  route(
+    "get",
+    "/api/v1/instances/:id/request-policy",
+    "instance.configure",
+    (req) =>
+      JSON.parse(
+        store.get(
+          "SELECT config FROM request_policies WHERE instance_id=?",
+          String(req.params.id),
+        )?.config || "{}",
+      ),
+    true,
+  );
+  route(
+    "put",
+    "/api/v1/instances/:id/request-policy",
+    "instance.configure",
+    (req) => {
+      fields(req.body, [
+        "approval",
+        "requireVoice",
+        "cooldownSeconds",
+        "dailyLimit",
+        "maxItemsPerRequest",
+        "dailyItems",
+      ]);
+      if (
+        typeof req.body.approval !== "boolean" ||
+        typeof req.body.requireVoice !== "boolean"
+      )
+        throw new AppError("INVALID_POLICY", "Invalid request policy");
+      const value = {
+        approval: req.body.approval,
+        requireVoice: req.body.requireVoice,
+        cooldownSeconds: integer(req.body.cooldownSeconds, 0, 3600, 15),
+        dailyLimit: integer(req.body.dailyLimit, 1, 1000, 30),
+        maxItemsPerRequest: integer(req.body.maxItemsPerRequest, 1, 2000, 100),
+        dailyItems: integer(req.body.dailyItems, 1, 10000, 500),
+      };
+      store.run(
+        "INSERT INTO request_policies VALUES(?,?) ON CONFLICT(instance_id) DO UPDATE SET config=excluded.config",
+        String(req.params.id),
+        JSON.stringify(value),
+      );
+      return value;
+    },
+    true,
+  );
+  route("get", "/api/v1/requests", undefined, (req) =>
+    store
+      .all("SELECT * FROM requests ORDER BY created_at DESC LIMIT 200")
+      .filter(
+        (row) =>
+          row.actor === req.actor.id ||
+          policy.allowed(req.actor, "requests.approve", row.instance_id),
+      )
+      .map((row) => ({ ...row, source: JSON.parse(row.source) })),
+  );
+  route("post", "/api/v1/requests", undefined, (req) =>
+    runtime.requests.submit(
+      req.actor,
+      text(req.body.instanceId, "room"),
+      req.body.selection,
+      req.body.confirm === true,
+    ),
+  );
+  route("post", "/api/v1/requests/:id/:decision", undefined, (req) => {
+    if (!["approve", "reject", "cancel"].includes(String(req.params.decision)))
+      throw new AppError("INVALID_DECISION", "Invalid decision");
+    return runtime.requests.decide(
+      req.actor,
+      String(req.params.id),
+      req.params.decision as any,
+    );
+  });
+  route("get", "/api/v1/permissions", "permissions.manage", () => ({
+    actions,
+    rules: store.all("SELECT * FROM permission_rules"),
+    users: store.all("SELECT id,username,role FROM users"),
+  }));
+  route("post", "/api/v1/permissions", "permissions.manage", (req) => {
+    fields(req.body, [
+      "guildId",
+      "instanceId",
+      "subjectType",
+      "subjectId",
+      "action",
+      "effect",
+    ]);
+    const b = req.body;
+    if (
+      !actions.includes(b.action) ||
+      !["allow", "deny"].includes(b.effect) ||
+      !["user", "role", "guild"].includes(b.subjectType)
+    )
+      throw new AppError("INVALID_RULE", "Invalid permission rule");
+    if (
+      b.instanceId &&
+      !store.get("SELECT id FROM instances WHERE id=?", b.instanceId)
+    )
+      throw new AppError("INVALID_ROOM", "Room not found");
+    const id = randomUUID();
+    store.run(
+      "INSERT INTO permission_rules VALUES(?,?,?,?,?,?,?)",
+      id,
+      b.guildId ? snowflake(b.guildId) : null,
+      b.instanceId || null,
+      b.subjectType,
+      text(b.subjectId, "subject ID", 80),
+      b.action,
+      b.effect,
+    );
+    return { id };
+  });
+  route("delete", "/api/v1/permissions/:id", "permissions.manage", (req) => {
+    store.run("DELETE FROM permission_rules WHERE id=?", String(req.params.id));
+  });
+  route("post", "/api/v1/users", "permissions.manage", async (req) => {
+    fields(req.body, ["username", "password", "role"]);
+    if (req.actor.role !== "owner")
+      throw new AppError(
+        "OWNER_REQUIRED",
+        "Only the owner may create web administrators",
+        403,
+      );
+    if (!["admin", "operator", "viewer"].includes(req.body.role))
+      throw new AppError("INVALID_ROLE", "Choose admin, operator or viewer");
+    const id = randomUUID();
+    store.run(
+      "INSERT INTO users VALUES(?,?,?,?,?)",
+      id,
+      text(req.body.username, "username", 80),
+      await auth.passwordHash(req.body.password),
+      req.body.role,
+      Date.now(),
+    );
+    return { id };
+  });
+  route("get", "/api/v1/applications", "integrations.manage", () =>
+    runtime.discord.list(),
+  );
+  route("post", "/api/v1/applications", "integrations.manage", (req) =>
+    runtime.discord.save(req.body),
+  );
+  route("patch", "/api/v1/applications/:id", "integrations.manage", (req) =>
+    runtime.discord.save(req.body, String(req.params.id)),
+  );
+  for (const name of ["start", "stop", "remove"] as const)
+    route(
+      "post",
+      `/api/v1/applications/:id/${name}`,
+      "integrations.manage",
+      (req) => {
+        if (name === "remove" && req.body.confirm !== true)
+          throw new AppError("CONFIRM_REQUIRED", "Confirm application removal");
+        return runtime.discord[name](String(req.params.id));
+      },
+    );
+  route(
+    "get",
+    "/api/v1/applications/:id/guilds",
+    "integrations.manage",
+    (req) => runtime.discord.destinations(String(req.params.id)),
+  );
+  route(
+    "post",
+    "/api/v1/providers/:id/revoke",
+    "secrets.rotate",
+    async (req) => {
+      policy.require(req.actor, "integrations.manage");
+      if (req.body.confirm !== true)
+        throw new AppError(
+          "CONFIRM_REQUIRED",
+          "Confirm credential revocation and stopping affected playback",
+        );
+      await instances.drainProvider(String(req.params.id));
+      providers.revoke(String(req.params.id));
+      instances.refreshProviders();
+    },
+  );
+  route(
+    "post",
+    "/api/v1/instances/:id/revoke",
+    "secrets.rotate",
+    async (req) => {
+      policy.require(req.actor, "instance.configure", String(req.params.id));
+      if (req.body.confirm !== true)
+        throw new AppError(
+          "CONFIRM_REQUIRED",
+          "Confirm stopping this instance and revoking its credential",
+        );
+      await instances.stop(String(req.params.id));
+      const row = store.get(
+        "SELECT secret_id FROM instances WHERE id=?",
+        String(req.params.id),
+      );
+      store.db.transaction(() => {
+        store.run(
+          "UPDATE instances SET secret_id=NULL,revision=revision+1 WHERE id=?",
+          String(req.params.id),
+        );
+        if (row.secret_id)
+          store.run(
+            "DELETE FROM secret_records WHERE id=? AND owner=?",
+            row.secret_id,
+            String(req.params.id),
+          );
+      })();
+    },
+  );
+  route("get", "/api/v1/secrets", "secrets.rotate", () =>
+    store
+      .all("SELECT id,purpose,owner,updated_at FROM secret_records")
+      .map((row) => ({
+        ...row,
+        inUse: !!(
+          store.get("SELECT id FROM instances WHERE secret_id=?", row.id) ||
+          store.get(
+            "SELECT id FROM media_providers WHERE secret_id=?",
+            row.id,
+          ) ||
+          store.get(
+            "SELECT id FROM discord_applications WHERE secret_id=?",
+            row.id,
+          ) ||
+          store.get("SELECT id FROM ai_settings WHERE secret_id=?", row.id) ||
+          store
+            .all(
+              "SELECT source FROM playlist_entries UNION ALL SELECT source FROM queue_items",
+            )
+            .some((s) => JSON.parse(s.source).inputSecretId === row.id)
+        ),
+      })),
+  );
+  route("delete", "/api/v1/secrets/:id", "secrets.rotate", (req) => {
+    if (req.body.confirm !== true)
+      throw new AppError(
+        "CONFIRM_REQUIRED",
+        "Confirm deleting this unused encrypted credential",
+      );
+    const id = String(req.params.id);
+    if (
+      store.get("SELECT id FROM instances WHERE secret_id=?", id) ||
+      store.get("SELECT id FROM media_providers WHERE secret_id=?", id) ||
+      store.get("SELECT id FROM discord_applications WHERE secret_id=?", id) ||
+      store.get("SELECT id FROM ai_settings WHERE secret_id=?", id) ||
+      store
+        .all(
+          "SELECT source FROM playlist_entries UNION ALL SELECT source FROM queue_items",
+        )
+        .some((s) => JSON.parse(s.source).inputSecretId === id)
+    )
+      throw new AppError(
+        "SECRET_IN_USE",
+        "Revoke this credential through its connection/instance first",
+        409,
+      );
+    store.run("DELETE FROM secret_records WHERE id=?", id);
+  });
+  route("get", "/api/v1/ai", "ai.configure", () => runtime.ai.settings());
+  route("put", "/api/v1/ai", "ai.configure", (req) =>
+    runtime.ai.save(req.body),
+  );
+  route("post", "/api/v1/ai/recommend", undefined, (req) =>
+    runtime.ai.recommend(
+      req.actor,
+      req.body.description,
+      text(req.body.instanceId, "room"),
+    ),
+  );
+  route("get", "/api/v1/settings", "integrations.manage", () => ({
+    origin: origin(),
+    trustedProxy: store.setting("trusted-proxy", ""),
+    sourceOrigins: store.setting("source-origins", []),
+    limits: store.setting("limits", {
+      maxWorkers: 8,
+      maxFfmpeg: 8,
+      maxWorkerRSSMB: 1024,
+    }),
+  }));
+  route("put", "/api/v1/settings", "integrations.manage", (req) => {
+    fields(req.body, [
+      "origin",
+      "trustedProxy",
+      "maxWorkers",
+      "maxFfmpeg",
+      "maxWorkerRSSMB",
+      "sourceOrigins",
+    ]);
+    const nextOrigin = req.body.origin || origin();
+    const u = new URL(nextOrigin);
+    if (
+      nextOrigin !== u.origin ||
+      !["http:", "https:"].includes(u.protocol) ||
+      u.username ||
+      u.password ||
+      (u.protocol === "http:" && !localOrigin(u.origin))
+    )
+      throw new AppError(
+        "INVALID_ORIGIN",
+        "Choose localhost HTTP or an HTTPS origin",
+      );
+    const proxy =
+      req.body.trustedProxy === undefined
+        ? store.setting("trusted-proxy", "")
+        : String(req.body.trustedProxy);
+    if (proxy && proxy !== "loopback")
+      for (const part of proxy.split(",")) {
+        const bitsParts = part.trim().split("/");
+        const [ip, prefix] = bitsParts;
+        const bits = isIP(ip) === 4 ? 32 : isIP(ip) === 6 ? 128 : 0;
+        if (
+          bitsParts.length > 2 ||
+          !bits ||
+          (prefix !== undefined &&
+            (!/^\d+$/.test(prefix) ||
+              Number(prefix) < 1 ||
+              Number(prefix) > bits))
+        )
+          throw new AppError(
+            "INVALID_PROXY",
+            "Choose an explicit proxy IP/CIDR or loopback",
+          );
+      }
+    const origins =
+      req.body.sourceOrigins ?? store.setting("source-origins", []);
+    if (!Array.isArray(origins) || origins.length > 100)
+      throw new AppError(
+        "INVALID_ORIGINS",
+        "Choose at most 100 direct-media origins",
+      );
+    for (const value of origins) {
+      const source = new URL(value);
+      if (
+        source.origin !== value ||
+        !["http:", "https:"].includes(source.protocol) ||
+        source.username ||
+        source.password
+      )
+        throw new AppError(
+          "INVALID_ORIGIN",
+          "Use exact HTTP(S) direct-media origins",
+        );
+    }
+    const limits = {
+      maxWorkers: integer(req.body.maxWorkers, 1, 64, 8),
+      maxFfmpeg: integer(req.body.maxFfmpeg, 1, 64, 8),
+      maxWorkerRSSMB: integer(req.body.maxWorkerRSSMB, 64, 16384, 1024),
+    };
+    app.set("trust proxy", proxy || false);
+    store.db.transaction(() => {
+      store.set("dashboard-origin", nextOrigin);
+      store.set("trusted-proxy", proxy);
+      store.set("source-origins", origins);
+      store.set("limits", limits);
+    })();
+    return { saved: true };
+  });
+  route("get", "/api/v1/system", "system.logs", () => ({
+    version: "StreamBot TV",
+    uid: process.getuid?.(),
+    rss: process.memoryUsage().rss,
+    cpu: process.cpuUsage(),
+    load: os.loadavg(),
+    workers: instances.list().map((i) => ({
+      id: i.id,
+      state: i.state,
+      metrics: i.metrics,
+      error: i.error,
+    })),
+    migrations: store.all("SELECT * FROM schema_migrations"),
+    gpu: { deviceExposed: fs.existsSync("/dev/dri"), softwareDefault: true },
+  }));
+  route("get", "/api/v1/audit", "system.logs", () =>
+    store.all("SELECT * FROM audit_events ORDER BY created_at DESC LIMIT 200"),
+  );
+  route("post", "/api/v1/vault/rotate", "secrets.rotate", () => {
+    runtime.vault.rotate();
+  });
+  route("post", "/api/v1/backups/export", "system.backup", (req) =>
+    runtime.backups.export(req.body.passphrase),
+  );
+  route("post", "/api/v1/backups/import", "system.backup", async (req) => {
+    if (req.actor.role !== "owner")
+      throw new AppError(
+        "OWNER_REQUIRED",
+        "Only the owner may replace the database",
+        403,
+      );
+    if (
+      instances
+        .list()
+        .some((i) => !["stopped", "disabled", "failed"].includes(i.state)) ||
+      runtime.discord.list().some((a) => a.connected)
+    )
+      throw new AppError(
+        "STOP_FIRST",
+        "Stop all workers and command connections before importing a backup",
+        409,
+      );
+    runtime.backups.import(
+      req.body.backup,
+      req.body.passphrase,
+      req.body.confirm === true,
+    );
+    providers.refresh();
+    return { signedOut: true };
+  });
+  route("post", "/api/v1/migration/upload", "integrations.manage", (req) => {
+    fields(req.body, ["environment", "config", "confirm", "createInstance"]);
+    return runtime.migration.upload(
+      req.body.environment,
+      req.body.config,
+      req.body.confirm === true,
+      req.body.createInstance === true,
+    );
+  });
+  route("get", "/api/v1/migration", "integrations.manage", () =>
+    runtime.migration.summary(),
+  );
+  route("post", "/api/v1/migration", "integrations.manage", (req) => {
+    if (req.body.confirm !== true)
+      throw new AppError(
+        "CONFIRM_REQUIRED",
+        "Review the migration summary and confirm first",
+      );
+    return runtime.migration.run(req.body.createInstance === true);
+  });
+  route("get", "/api/v1/events", undefined, (req, res) => {
+    policy.require(req.actor, "instance.view");
+    res.set({
+      "Content-Type": "text/event-stream",
+      Connection: "keep-alive",
+      "Cache-Control": "no-store",
+    });
+    res.flushHeaders();
+    const send = () => {
+      if (!auth.user(req.sessionToken)) {
+        res.end();
+        return;
+      }
+      res.write("event: refresh\ndata: {}\n\n");
+    };
+    runtime.instances.on("change", send);
+    const timer = setInterval(send, 15000);
+    req.on("close", () => {
+      clearInterval(timer);
+      runtime.instances.off("change", send);
+    });
+  });
   // Preserve catalog view and local files within the authenticated application.
-  Object.assign(config,{videosDir:path.join(runtime.dir,'videos'),previewCacheDir:path.join(runtime.dir,'preview-cache')});
-  app.use((req,res,next)=>{res.locals.stringify=stringify;res.locals.prettySize=prettySize;res.locals.layout='layouts/tv-library';(req as any).session={user:(req as Req).actor.id};next();});
-  app.use((req,res,next)=>{if(req.path==='/library'||req.path==='/api/providers'||req.path.startsWith('/api/providers/')||req.path==='/api/media'){policy.require((req as Req).actor,'media.search');}if(req.path.startsWith('/api/playback'))throw new AppError('INSTANCE_REQUIRED','Select a playback instance in StreamBot TV',409);next();});
+  Object.assign(config, {
+    videosDir: path.join(runtime.dir, "videos"),
+    previewCacheDir: path.join(runtime.dir, "preview-cache"),
+  });
+  app.use((req, res, next) => {
+    res.locals.stringify = stringify;
+    res.locals.prettySize = prettySize;
+    res.locals.layout = "layouts/tv-library";
+    (req as any).session = { user: (req as Req).actor.id };
+    next();
+  });
+  app.use((req, res, next) => {
+    if (
+      req.path === "/library" ||
+      req.path === "/api/providers" ||
+      req.path.startsWith("/api/providers/") ||
+      req.path === "/api/media"
+    ) {
+      policy.require((req as Req).actor, "media.search");
+    }
+    if (req.path.startsWith("/api/playback"))
+      throw new AppError(
+        "INSTANCE_REQUIRED",
+        "Select a playback instance in StreamBot TV",
+        409,
+      );
+    next();
+  });
   // EJS layout wrapper for retained library templates (no runtime CDN).
-  app.use(async(req,res,next)=>{if(req.path==='/library'){res.render('pages/media-library',(error,body)=>error?next(error):res.render('layouts/tv-library',{body}));return;}next();});
-  app.get('/api/media',async(req,res)=>res.json(await runtime.catalog.search((req as Req).actor,String(req.query.q||'').slice(0,300),req.query.room as string,{provider:req.query.provider,kind:req.query.kind,offset:req.query.offset,library:req.query.library})));
-  app.use((req,_res,next)=>{const match=req.path.match(/^\/api\/providers\/([^/]+)\/(?:items|libraries)/);if(match)runtime.catalog.provider((req as Req).actor,match[1],req.query.room as string);next();});
+  app.use(async (req, res, next) => {
+    if (req.path === "/library") {
+      res.render("pages/media-library", (error, body) =>
+        error ? next(error) : res.render("layouts/tv-library", { body }),
+      );
+      return;
+    }
+    next();
+  });
+  app.get("/api/media", async (req, res) =>
+    res.json(
+      await runtime.catalog.search(
+        (req as Req).actor,
+        String(req.query.q || "").slice(0, 300),
+        req.query.room as string,
+        {
+          provider: req.query.provider,
+          kind: req.query.kind,
+          offset: req.query.offset,
+          library: req.query.library,
+        },
+      ),
+    ),
+  );
+  app.use((req, _res, next) => {
+    const match = req.path.match(
+      /^\/api\/providers\/([^/]+)\/(?:items|libraries)/,
+    );
+    if (match)
+      runtime.catalog.provider(
+        (req as Req).actor,
+        match[1],
+        req.query.room as string,
+      );
+    next();
+  });
   app.use(mediaRoutes(providers.registry));
-  app.use('/js',express.static(path.join(process.cwd(),'src/server/public/js')));
-  route('get','/api/v1/local','media.search',()=>fs.readdirSync(config.videosDir).filter(f=>fs.statSync(path.join(config.videosDir,f)).isFile()));
-  const upload=multer({storage:multer.diskStorage({destination:(_req,_file,cb)=>cb(null,config.videosDir),filename:(_req,file,cb)=>{const name=path.basename(file.originalname);if(name!==file.originalname||name.includes('\\'))cb(new AppError('INVALID_FILE','Invalid filename'),name);else cb(null,`${randomUUID()}-${name}`);}}),limits:{fileSize:2*1024*1024*1024,files:1}});
-  app.post('/api/v1/local/upload',(req,res,next)=>{policy.require((req as Req).actor,'queue.add');upload.single('file')(req,res,next);},(req,res)=>res.json({filename:req.file?.filename}));
-  app.use((req,res,next)=>{if(req.path.startsWith('/preview/')||req.path.startsWith('/api/preview/'))policy.require((req as Req).actor,'media.search');if(req.path.startsWith('/delete/'))policy.require((req as Req).actor,'queue.clear');next();});
+  app.use(
+    "/js",
+    express.static(path.join(process.cwd(), "src/server/public/js")),
+  );
+  route("get", "/api/v1/local", "media.search", () =>
+    fs
+      .readdirSync(config.videosDir)
+      .filter((f) => fs.statSync(path.join(config.videosDir, f)).isFile()),
+  );
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, config.videosDir),
+      filename: (_req, file, cb) => {
+        const name = path.basename(file.originalname);
+        if (name !== file.originalname || name.includes("\\"))
+          cb(new AppError("INVALID_FILE", "Invalid filename"), name);
+        else cb(null, `${randomUUID()}-${name}`);
+      },
+    }),
+    limits: { fileSize: 2 * 1024 * 1024 * 1024, files: 1 },
+  });
+  app.post(
+    "/api/v1/local/upload",
+    (req, res, next) => {
+      policy.require((req as Req).actor, "queue.add");
+      upload.single("file")(req, res, next);
+    },
+    (req, res) => res.json({ filename: req.file?.filename }),
+  );
+  app.use((req, res, next) => {
+    if (
+      req.path.startsWith("/preview/") ||
+      req.path.startsWith("/api/preview/")
+    )
+      policy.require((req as Req).actor, "media.search");
+    if (req.path.startsWith("/delete/"))
+      policy.require((req as Req).actor, "queue.clear");
+    next();
+  });
   app.use(previewRoutes);
-  app.use((error:unknown,_req:Request,res:Response,_next:NextFunction)=>{const result=publicError(error);if(!res.headersSent)res.status(result.status).json(result.body);else res.end();});
+  app.use(
+    (error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+      const result = publicError(error);
+      if (!res.headersSent) res.status(result.status).json(result.body);
+      else res.end();
+    },
+  );
   return app;
 }

@@ -1,18 +1,44 @@
-import { Database } from 'bun:sqlite';
-import fs from 'node:fs';
-import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { Database } from "bun:sqlite";
+import fs from "node:fs";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 
-export const tables = ['app_settings','users','sessions','secret_records','media_providers','discord_applications','instances','instance_runtime','playlists','playlist_entries','queue_items','playback_checkpoints','permission_rules','request_policies','requests','ai_settings','audit_events'];
+export const tables = [
+  "app_settings",
+  "users",
+  "sessions",
+  "secret_records",
+  "media_providers",
+  "discord_applications",
+  "instances",
+  "instance_runtime",
+  "playlists",
+  "playlist_entries",
+  "queue_items",
+  "playback_checkpoints",
+  "permission_rules",
+  "request_policies",
+  "requests",
+  "ai_settings",
+  "audit_events",
+];
 export class AppStore {
   readonly db: Database;
   constructor(readonly dir: string) {
-    fs.mkdirSync(path.join(dir, 'database'), { recursive: true, mode: 0o700 });
-    this.db = new Database(path.join(dir, 'database/streambot.sqlite'), { create: true });
-    this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+    fs.mkdirSync(path.join(dir, "database"), { recursive: true, mode: 0o700 });
+    this.db = new Database(path.join(dir, "database/streambot.sqlite"), {
+      create: true,
+    });
+    this.db.exec(
+      "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
+    );
     this.db.transaction(() => {
-      this.db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);`);
-      const version = this.db.query('SELECT max(version) AS version FROM schema_migrations').get() as any;
+      this.db.exec(
+        `CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);`,
+      );
+      const version = this.db
+        .query("SELECT max(version) AS version FROM schema_migrations")
+        .get() as any;
       if (!version.version) {
         this.db.exec(`
           CREATE TABLE app_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -38,16 +64,43 @@ export class AppStore {
         `);
       }
     })();
-    fs.chmodSync(path.join(dir, 'database/streambot.sqlite'), 0o600);
+    fs.chmodSync(path.join(dir, "database/streambot.sqlite"), 0o600);
   }
-  get<T = any>(sql: string, ...args: any[]): T { return this.db.query(sql).get(...args) as T; }
-  all<T = any>(sql: string, ...args: any[]): T[] { return this.db.query(sql).all(...args) as T[]; }
-  run(sql: string, ...args: any[]) { return this.db.query(sql).run(...args); }
-  setting<T>(key: string, fallback: T): T { const row = this.get('SELECT value FROM app_settings WHERE key=?', key); return row ? JSON.parse(row.value) : fallback; }
-  set(key: string, value: unknown) { this.run('INSERT INTO app_settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', key, JSON.stringify(value)); }
-  audit(actor: string, action: string, target: string, outcome = 'success') {
-    this.run('INSERT INTO audit_events VALUES(?,?,?,?,?,?)', randomUUID(), actor, action, target, outcome, Date.now());
-    this.run('DELETE FROM audit_events WHERE id IN (SELECT id FROM audit_events ORDER BY created_at DESC LIMIT -1 OFFSET 20000)');
+  get<T = any>(sql: string, ...args: any[]): T {
+    return this.db.query(sql).get(...args) as T;
   }
-  close() { this.db.close(); }
+  all<T = any>(sql: string, ...args: any[]): T[] {
+    return this.db.query(sql).all(...args) as T[];
+  }
+  run(sql: string, ...args: any[]) {
+    return this.db.query(sql).run(...args);
+  }
+  setting<T>(key: string, fallback: T): T {
+    const row = this.get("SELECT value FROM app_settings WHERE key=?", key);
+    return row ? JSON.parse(row.value) : fallback;
+  }
+  set(key: string, value: unknown) {
+    this.run(
+      "INSERT INTO app_settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+      key,
+      JSON.stringify(value),
+    );
+  }
+  audit(actor: string, action: string, target: string, outcome = "success") {
+    this.run(
+      "INSERT INTO audit_events VALUES(?,?,?,?,?,?)",
+      randomUUID(),
+      actor,
+      action,
+      target,
+      outcome,
+      Date.now(),
+    );
+    this.run(
+      "DELETE FROM audit_events WHERE id IN (SELECT id FROM audit_events ORDER BY created_at DESC LIMIT -1 OFFSET 20000)",
+    );
+  }
+  close() {
+    this.db.close();
+  }
 }

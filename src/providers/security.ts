@@ -65,9 +65,10 @@ export async function networkAddresses(url: URL, allowPrivate = true) {
   const addresses = isIP(host) ? [{ address: host, family: isIP(host) }] : await lookup(host, { all: true });
   for (const { address } of addresses) {
     const ip = address.toLowerCase();
-    const mapped = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
-    if (/^(169\.254\.|0\.|224\.|255\.)/.test(mapped) || mapped === '100.100.100.200' || /^(fe[89ab]|ff)/.test(ip) || ip === '::') throw new ProviderError('Link-local, metadata and multicast destinations are not allowed');
-    if (!allowPrivate && (/^(10\.|127\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(mapped) || ip === '::1' || /^f[cd]/.test(ip))) throw new ProviderError('Private AI endpoints require explicit private-network permission');
+    let mapped = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
+    if(ip.startsWith('::ffff:')&&mapped.includes(':')){const parts=mapped.split(':').map(p=>parseInt(p,16));if(parts.length===2)mapped=[parts[0]>>8,parts[0]&255,parts[1]>>8,parts[1]&255].join('.');}
+    if (/^(169\.254\.|0\.|2(2[4-9]|[3-5][0-9])\.)/.test(mapped) || mapped === '100.100.100.200' || /^(fe[89ab]|ff)/.test(ip) || ip === '::' || ip==='fd00:ec2::254') throw new ProviderError('Link-local, metadata and multicast destinations are not allowed');
+    if (!allowPrivate && (/^(10\.|127\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(mapped) || ip === '::1' || /^f[cd]/.test(ip))) throw new ProviderError('Private AI endpoints require explicit private-network permission');
   }
   if (!addresses.length) throw new ProviderError('Provider DNS returned no addresses');
   return addresses;

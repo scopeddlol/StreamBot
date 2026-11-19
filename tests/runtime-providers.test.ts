@@ -1,4 +1,72 @@
-import{test,expect}from'bun:test';import{fixture}from'./tv-helpers.js';import{networkAddresses}from'../src/providers/security.js';
-test('runtime provider add/edit/test/remove uses encrypted injected credentials and preserves unrelated handles',async()=>{const{runtime:r,cleanup}=fixture();const server=Bun.serve({port:0,hostname:'127.0.0.1',fetch(req){const u=new URL(req.url);if(req.headers.get('X-Emby-Token')!=='fixture-runtime-token')return new Response('',{status:401});if(u.pathname==='/System/Info/Public')return Response.json({Version:'fixture'});return Response.json({Id:'fixture-user'});}});try{const a=await r.providers.save({name:'Fixture provider',kind:'jellyfin',baseUrl:`http://127.0.0.1:${server.port}`,credentials:{token:'fixture-runtime-token'}});expect(JSON.stringify(a)).not.toContain('fixture-runtime-token');expect((await r.providers.registry.get(a.id).healthCheck()).version).toBe('fixture');const handle=r.providers.registry.get(a.id);await r.providers.save({name:'Unrelated',kind:'silo',baseUrl:`http://127.0.0.1:${server.port}`,credentials:{token:'fixture-runtime-token'}});expect(r.providers.registry.get(a.id)).toBe(handle);await expect(r.providers.save({baseUrl:'http://127.0.0.1:7',revision:a.revision},a.id)).rejects.toThrow('Re-enter');await r.providers.save({name:'Renamed',revision:a.revision},a.id);r.providers.remove(a.id);expect(()=>r.providers.registry.get(a.id)).toThrow();expect(JSON.stringify(r.store.all('SELECT * FROM secret_records'))).not.toContain('fixture-runtime-token');}finally{server.stop(true);await cleanup();}});
-test('metadata/link-local destinations are rejected even when explicitly configured',async()=>{await expect(networkAddresses(new URL('http://169.254.169.254'))).rejects.toThrow('not allowed');await expect(networkAddresses(new URL('http://metadata.google.internal'))).rejects.toThrow('not allowed');await expect(networkAddresses(new URL('http://127.0.0.1'),false)).rejects.toThrow('Private AI');});
-test('IPv6-mapped metadata addresses remain blocked',async()=>{await expect(networkAddresses(new URL('http://[::ffff:a9fe:a9fe]'))).rejects.toThrow('not allowed');await expect(networkAddresses(new URL('http://[fd00:ec2::254]'))).rejects.toThrow('not allowed');});
+import { test, expect } from "bun:test";
+import { fixture } from "./tv-helpers.js";
+import { networkAddresses } from "../src/providers/security.js";
+test("runtime provider add/edit/test/remove uses encrypted injected credentials and preserves unrelated handles", async () => {
+  const { runtime: r, cleanup } = fixture();
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch(req) {
+      const u = new URL(req.url);
+      if (req.headers.get("X-Emby-Token") !== "fixture-runtime-token")
+        return new Response("", { status: 401 });
+      if (u.pathname === "/System/Info/Public")
+        return Response.json({ Version: "fixture" });
+      return Response.json({ Id: "fixture-user" });
+    },
+  });
+  try {
+    const a = await r.providers.save({
+      name: "Fixture provider",
+      kind: "jellyfin",
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      credentials: { token: "fixture-runtime-token" },
+    });
+    expect(JSON.stringify(a)).not.toContain("fixture-runtime-token");
+    expect((await r.providers.registry.get(a.id).healthCheck()).version).toBe(
+      "fixture",
+    );
+    const handle = r.providers.registry.get(a.id);
+    await r.providers.save({
+      name: "Unrelated",
+      kind: "silo",
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      credentials: { token: "fixture-runtime-token" },
+    });
+    expect(r.providers.registry.get(a.id)).toBe(handle);
+    await expect(
+      r.providers.save(
+        { baseUrl: "http://127.0.0.1:7", revision: a.revision },
+        a.id,
+      ),
+    ).rejects.toThrow("Re-enter");
+    await r.providers.save({ name: "Renamed", revision: a.revision }, a.id);
+    r.providers.remove(a.id);
+    expect(() => r.providers.registry.get(a.id)).toThrow();
+    expect(
+      JSON.stringify(r.store.all("SELECT * FROM secret_records")),
+    ).not.toContain("fixture-runtime-token");
+  } finally {
+    server.stop(true);
+    await cleanup();
+  }
+});
+test("metadata/link-local destinations are rejected even when explicitly configured", async () => {
+  await expect(
+    networkAddresses(new URL("http://169.254.169.254")),
+  ).rejects.toThrow("not allowed");
+  await expect(
+    networkAddresses(new URL("http://metadata.google.internal")),
+  ).rejects.toThrow("not allowed");
+  await expect(
+    networkAddresses(new URL("http://127.0.0.1"), false),
+  ).rejects.toThrow("Private AI");
+});
+test("IPv6-mapped metadata addresses remain blocked", async () => {
+  await expect(
+    networkAddresses(new URL("http://[::ffff:a9fe:a9fe]")),
+  ).rejects.toThrow("not allowed");
+  await expect(
+    networkAddresses(new URL("http://[fd00:ec2::254]")),
+  ).rejects.toThrow("not allowed");
+});

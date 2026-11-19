@@ -17,9 +17,10 @@ async function stop() {
   server.close();
   const deadline = setTimeout(() => process.exit(1), 40000);
   deadline.unref();
-  await runtime.shutdown();
+  const clean = await runtime.shutdown();
   server.closeAllConnections();
-  clearTimeout(deadline);
+  if (clean) clearTimeout(deadline);
+  else deadline.ref();
 }
 process.once("SIGTERM", () => void stop());
 process.once("SIGINT", () => void stop());

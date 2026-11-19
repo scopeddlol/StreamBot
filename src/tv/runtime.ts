@@ -14,6 +14,7 @@ import { DiscordApplications } from "./discord.js";
 import { Backups } from "./backups.js";
 import { LegacyImport } from "./migration.js";
 export class TVRuntime {
+  private closing = false;
   store: AppStore;
   vault: Vault;
   auth: Auth;
@@ -152,14 +153,19 @@ export class TVRuntime {
     };
   }
   async recover() {
-    await this.instances.recover();
+    const workers = this.instances.recover();
     for (const id of this.store.setting<string[]>("discord-autostart", []))
-      await this.discord.start(id).catch(() => {});
+      if (!this.closing) await this.discord.start(id).catch(() => {});
+    await workers;
   }
   async shutdown() {
-    await this.discord.shutdown();
-    await this.instances.shutdown();
+    this.closing = true;
+    const results = await Promise.allSettled([
+      this.discord.shutdown(),
+      this.instances.shutdown(),
+    ]);
     this.store.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     this.store.close();
+    return results.every((result) => result.status === "fulfilled");
   }
 }

@@ -47,3 +47,20 @@ test("requests enforce authorization before catalog, confirmation, duplicate pro
     await cleanup();
   }
 });
+
+test("command application stop awaits the pinned SDK's asynchronous disconnect", async () => {
+  const { runtime: r, cleanup } = fixture();
+  try {
+    let disconnected = false;
+    (r.discord as any).clients.set("fixture-application", {
+      destroy: async () => {
+        await Bun.sleep(20);
+        disconnected = true;
+      },
+    });
+    await r.discord.stop("fixture-application");
+    expect(disconnected).toBe(true);
+  } finally {
+    await cleanup();
+  }
+});

@@ -23,6 +23,7 @@ interface Selection {
   choices: any[];
 }
 export class DiscordApplications {
+  private closing = false;
   private clients = new Map<string, Client>();
   private selections = new Map<string, Selection>();
   private errors = new Map<string, string>();
@@ -36,15 +37,13 @@ export class DiscordApplications {
     readonly ai: Concierge,
   ) {}
   list() {
-    return this.store
-      .all("SELECT * FROM discord_applications")
-      .map((row) => ({
-        ...JSON.parse(row.config),
-        id: row.id,
-        connected: this.clients.get(row.id)?.isReady() || false,
-        error: this.errors.get(row.id),
-        secret: this.vault.metadata(row.secret_id),
-      }));
+    return this.store.all("SELECT * FROM discord_applications").map((row) => ({
+      ...JSON.parse(row.config),
+      id: row.id,
+      connected: this.clients.get(row.id)?.isReady() || false,
+      error: this.errors.get(row.id),
+      secret: this.vault.metadata(row.secret_id),
+    }));
   }
   save(input: any, id?: string) {
     fields(input, ["name", "applicationId", "guildIds", "credential"]);
@@ -97,6 +96,12 @@ export class DiscordApplications {
     return this.list().find((v) => v.id === id);
   }
   async start(id: string) {
+    if (this.closing)
+      throw new AppError(
+        "SHUTTING_DOWN",
+        "Command connections are stopping",
+        503,
+      );
     if (this.clients.has(id)) return;
     const row = this.store.get(
       "SELECT * FROM discord_applications WHERE id=?",
@@ -133,6 +138,12 @@ export class DiscordApplications {
         for (const command of this.commands())
           await client.application!.commands.create(command, guildId);
       }
+      if (this.closing)
+        throw new AppError(
+          "SHUTTING_DOWN",
+          "Command connections are stopping",
+          503,
+        );
       this.errors.delete(id);
       this.store.set("discord-autostart", [
         ...new Set([
@@ -180,15 +191,18 @@ export class DiscordApplications {
     return results;
   }
   async stop(id: string, persist = true) {
-    if (persist)
+    if (persist && !this.closing)
       this.store.set(
         "discord-autostart",
         this.store
           .setting<string[]>("discord-autostart", [])
           .filter((value) => value !== id),
       );
-    this.clients.get(id)?.destroy();
-    this.clients.delete(id);
+    try {
+      await this.clients.get(id)?.destroy();
+    } finally {
+      this.clients.delete(id);
+    }
   }
   async remove(id: string) {
     await this.stop(id);
@@ -518,6 +532,7 @@ export class DiscordApplications {
     }
   }
   async shutdown() {
+    this.closing = true;
     await Promise.all(
       [...this.clients.keys()].map((id) => this.stop(id, false)),
     );

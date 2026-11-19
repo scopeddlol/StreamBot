@@ -14,5 +14,5 @@ jobs:
           bun-version: 1.3.10
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run build && bun test
-      - run: docker build -t streambot-media:local .
+      - run: docker build -t streambot-tv:local .
       - run: bash scripts/smoke-container.sh

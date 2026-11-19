@@ -1,24 +1,29 @@
 services:
   streambot:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: streambot-media:local
+    build: .
+    image: streambot-tv:local
     restart: unless-stopped
     init: true
-    env_file:
-      - ${STREAMBOT_ENV_FILE:-.env}
     environment:
-      VIDEOS_DIR: /home/bots/StreamBot/videos
-      PREVIEW_CACHE_DIR: /home/bots/StreamBot/tmp/preview-cache
-      MEDIA_SERVERS_CONFIG: /home/bots/StreamBot/config/media-servers.json
-      SERVER_ENABLED: "true"
-      SERVER_HOST: "0.0.0.0"
+      DATA_DIR: /data
+      SERVER_HOST: 0.0.0.0
       SERVER_PORT: "3000"
+      XDG_CACHE_HOME: /data/cache
     volumes:
-      - ./data/videos:/home/bots/StreamBot/videos
-      - ./data/preview-cache:/home/bots/StreamBot/tmp/preview-cache
-      - ./config:/home/bots/StreamBot/config:ro
+      - ./data:/data
     ports:
       - "127.0.0.1:3000:3000"
-    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:size=1G,mode=1777
+    cap_drop:
+      - ALL
+    # Directory initialization and immediate privilege drop only; Bun runs as UID 1000.
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 45s

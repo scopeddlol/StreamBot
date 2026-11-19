@@ -1,136 +1,112 @@
-# StreamBot media libraries
+# StreamBot TV
 
-A StreamBot fork adding Jellyfin and Silo compatibility-library browsing to the existing FFmpeg → Discord streamer. TypeScript, Bun, Express/EJS. Upstream: [ysdragon/StreamBot](https://github.com/ysdragon/StreamBot), MIT; original attribution and [LICENSE](LICENSE) retained. The [original README](docs/UPSTREAM_README.md) is historical; use this page for this fork's deployment.
+A single-container broadcast dashboard for independent playback rooms, persistent live-TV playlists, on-demand requests, Jellyfin/Silo browsing, encrypted credentials, permissions and optional catalog-based AI recommendations.
 
-**Discord account risk:** StreamBot is a self-bot using a regular Discord account. Discord prohibits self-bots and may suspend the account. This is not an official Discord bot; Docker does not remove that risk. No evasion features are included.
+Continued in [scopeddlol/StreamBot](https://github.com/scopeddlol/StreamBot/tree/feat/jellyfin-silo-integration), branch `feat/jellyfin-silo-integration`. Based on [ysdragon/StreamBot](https://github.com/ysdragon/StreamBot); MIT license and attribution retained. Bun 1.3.10, TypeScript, Express/EJS, SQLite WAL, FFmpeg and yt-dlp. No external database, scheduler or management service is required.
 
-## Current verification
+**Platform and rights notice:** An official Discord application handles legitimate commands and interactions; its token cannot broadcast native Go Live video. Video playback uses the explicitly experimental user-account transport. Discord prohibits self-bots and may suspend that account. This project has no Discord approval, account/token harvesting, evasion or DRM bypass. Broadcast only content you have permission to share.
 
-Local TypeScript build, automated HTTP/queue/security tests, native streaming-module import, and real FFmpeg audio/video decoding of generated media through progressive/HLS gateways pass. [Fork CI](https://github.com/scopeddlol/StreamBot/actions/runs/44460057666) also passed the Linux amd64 Docker build, native import, toolchain checks, and isolated dashboard-only Compose start/restart/persistent-mount smoke test. The local Docker build encountered host storage I/O errors and was stopped; container checks ran on GitHub instead. No live Discord, Jellyfin or Silo credentials/instances were supplied. See [implementation notes](docs/IMPLEMENTATION_NOTES.md) and the [live checklist](docs/LIVE_VERIFICATION.md). The fork is [scopeddlol/StreamBot](https://github.com/scopeddlol/StreamBot), branch `feat/jellyfin-silo-integration`.
+## Start with no credentials
 
-## Install with Compose
-
-Requires Docker Engine with Compose, adequate free disk (allow several GiB for native media dependencies/build layers), and network access to existing media servers and Discord. The stack builds this checkout; it does not deploy the unmodified upstream image or create media-server containers/databases.
+From this checkout:
 
 ```sh
-cp .env.example .env
-mkdir -p data/videos data/preview-cache config
-cp config/media-servers.example.json config/media-servers.json
-chmod 600 .env config/media-servers.json
+docker compose up -d --build
 ```
 
-Privately edit `.env` and `config/media-servers.json`:
-
-- Fill `TOKEN`, `PREFIX`, `GUILD_ID`, `COMMAND_CHANNEL_ID`, `VIDEO_CHANNEL_ID`, and `ADMIN_IDS`. Only listed admin IDs in that guild/channel can execute commands, including playback controls. Use a dedicated test account/channel for verification.
-- Set `SERVER_USERNAME`, a strong `SERVER_PASSWORD` (at least 16 characters, preferably random), and a separate random `SESSION_SECRET` (at least 32 characters). Bcrypt and Argon2 hashes are supported; single-quote values containing `$` in Compose env files. Generate random values locally with `openssl rand -hex 32`; never send them in chat or commit them.
-- Set `SERVER_PUBLIC_ORIGIN=http://localhost:3000` for the default local dashboard. All mutations, including login, require that exact browser Origin. Opening the dashboard as `127.0.0.1` requires changing this setting accordingly.
-- Set provider credentials in the environment variable names referenced by the JSON. Remove providers you do not use. `{"servers":[]}` is valid. IDs must be unique, letters/digits/underscore/hyphen, and are used by commands. More than one instance of either kind is supported.
-- The JSON file is private even though it contains only environment references: its server URLs may identify private infrastructure. Real tokens/passwords never belong in JSON. `.env`, runtime config, local data and cookies are ignored by Git and excluded from Docker build context.
+Open [http://localhost:3000](http://localhost:3000). There is no default administrator and no `.env` prerequisite. Read the one-time pairing code in the local container logs:
 
 ```sh
-docker compose config --quiet
-docker compose build
-docker compose up -d
-docker compose logs --tail=100 streambot
+docker compose logs --tail=30 streambot
 ```
 
-Open [the local dashboard](http://localhost:3000/library). Log in with the configured admin credentials. The same process owns the Discord client, dashboard and playback queue; **use the default `bun start` container command for playback**. `bun run server` is a separate read-only browsing mode and reports playback unavailable.
+1. Claim the administrator using the pairing code, a unique username, a password of at least 16 characters, and the rights notice. Codes expire after 15 minutes and cannot be replayed; the wizard can renew an expired code into the local logs.
+2. Under **Connections**, add optional Jellyfin/Silo sources and test them. Credentials are entered privately in the browser, encrypted at rest, and never echoed back.
+3. Optionally add an official Discord application with its application ID, bot token and installed guild IDs. The panel provides an installation link. Start the connection to register commands and enable guild/voice-channel discovery. Installation still requires your Discord permissions.
+4. Under **Instances**, create Live TV or On Demand rooms. Pick a transport, destination, optional legacy command channel, encoder settings, source restrictions and retry policy. Discovered destinations are convenient choices, not proof that the playback account has access: Join/Move checks that account's actual guild/channel permissions.
+5. For video, explicitly acknowledge the experimental transport risk and supply its account credential. Each concurrently active playback account and destination must be independent. Start the room; no Compose edits or application restart are required.
+6. Under **Media Library**, select a target room, browse shows/seasons/episodes, select versions or bulk items, and add them. Live rooms use persistent playlists; on-demand rooms use independent request queues. Start a stopped instance separately.
 
-The checked-in mount paths are writable local video storage and preview cache. Queue/session state is in memory, intentionally resets on restart, and introduces no database. Media files/config/cache survive restarts through the bind mounts. In Linux deployments ensure the mounted directories/config are readable (and data directories writable) by container UID/GID 1000. Do not make private config world-readable to work around permissions.
+A fresh installation works without Discord, media or AI connections. Empty/unsupported configurations display actionable errors instead of pretending to stream. Eight active workers are allowed by default; **System** can raise/lower concurrency, encoder and worker RSS caps. Capacity depends on your actual host and codecs.
 
-### Reach existing media servers
+## One container and persistent data
 
-Example URLs are placeholders, not deployed defaults. `localhost` inside StreamBot is the StreamBot container, not the host or media server. Use a reachable LAN/Tailscale URL, or attach this service to an existing private external Docker network and use the media server's service DNS name. For a host service on Linux, explicitly configure an appropriate host-gateway mapping if needed. This stack does not modify your server databases or media files.
-
-The provider allows only the exact configured origin (scheme, host, port). API redirects, playback redirects, HLS playlists, segments, keys and artwork must stay on that origin. Cross-origin delivery/CDN/transcode nodes are deliberately rejected; expose a trusted same-origin media reverse proxy if necessary. Server filesystem `Path` fields are never opened locally.
-
-HTTPS certificate verification stays enabled. For a private CA, mount the CA certificate read-only and set `NODE_EXTRA_CA_CERTS` to that path (verify support in your deployed Bun version); use a properly trusted server certificate. Do not disable TLS verification. Private HTTP is supported for explicitly configured trusted-network servers.
-
-### Jellyfin
-
-Use the actual API base URL, including any reverse-proxy path prefix. Configure either:
-
-1. `credentialEnv` naming an API token and `userId` identifying the intended Jellyfin viewer; or
-2. `usernameEnv` / `passwordEnv` naming an account login, with no `credentialEnv`.
-
-Server API keys may carry broad privileges; prefer a dedicated restricted viewer session/login when profile restrictions matter. The client checks identity and accessible libraries, requests item details, and uses POST `PlaybackInfo` at the front of the queue. It prefers returned direct URLs, then HLS. Jellyfin sometimes omits `DirectStreamUrl`; only after negotiation reports `SupportsDirectPlay`, this adapter uses the [documented static video route](https://github.com/jellyfin/jellyfin/blob/master/Jellyfin.Api/Controllers/VideosController.cs) with the returned media-source and session identifiers. It never substitutes an arbitrary filesystem path.
-
-### Silo
-
-Use the **actual enabled Jellyfin compatibility listener URL**, which may be a different port from Silo's native API. Do not point this adapter at `/api/v2`. Verify listener/version, the account's permitted library/profile and playback in the dashboard before streaming.
-
-The example uses `SILO_COMPAT_USERNAME=account#profile` and `SILO_COMPAT_PASSWORD` for a compatibility login. Current Silo source supports `password#pin` for PIN-protected profiles; confirm your deployed release's behavior before using it. Alternatively replace the login fields in JSON with `"credentialEnv":"SILO_COMPAT_TOKEN"` and supply a valid compatibility session token. Do not configure both modes. Login mode reauthenticates once when a compatibility credential expires.
-
-Native `Authorization: Bearer ...` and `X-Profile-Id` are not sent to compatibility endpoints. Current Silo source also resolves certain admin API keys to the owner's primary profile; this is not permission to assume any native or catalog-scoped key can play media. Prefer explicit profile compatibility login and test access. No native API fallback is implemented.
-
-References inspected: [compatibility API](https://github.com/Silo-Server/silo-server/blob/main/docs/jellycompat-api.md), [compatibility login](https://github.com/Silo-Server/silo-server/blob/main/internal/jellycompat/login.go), [API-key scope rules](https://github.com/Silo-Server/silo-server/blob/main/docs/api-keys-api.md). These describe current upstream source, not a verified installation supplied by the operator.
-
-### Dashboard security / reverse proxies
-
-Compose binds `127.0.0.1:3000`. Default HTTP cookies are HTTP-only, SameSite Strict, with an eight-hour lifetime. Login regenerates the session ID; login attempts are rate limited. Session storage is single-process memory, so logging in again after restart is expected.
-
-For TLS termination, set `SERVER_PUBLIC_ORIGIN=https://your-private-dashboard.example` and `SERVER_TRUST_PROXY` to the explicit trusted proxy IP/CIDR, or `loopback` only when the proxy really connects from loopback. This enables Secure cookies and forwarded HTTPS handling. Do not trust every source IP. A proxy in another container cannot reach a loopback-bound host port as `localhost`; attach both containers to an appropriately isolated shared network, remove the host port mapping if unnecessary, and scope trust to that proxy's address/network. Keep the UI private and authenticated.
-
-`GET /healthz` returns only `{"status":"ok"}`. This is process liveness, not a Discord/provider playback readiness claim. Provider connectivity appears separately in the authenticated source selector. No browser endpoint exposes raw media credentials or negotiated stream URLs. A random per-play loopback gateway passes source credentials only to the configured origin, proxies byte ranges, validates redirects and rewrites HLS URLs before FFmpeg sees them. Artwork is authenticated, bounded and cached only in the signed-in browser (`private`, five minutes); streams are not exposed as a dashboard download proxy.
-
-## Use
-
-The dashboard supports source/library selection, search, paginated movies/series, poster/details/runtime/codec summary, series → seasons → episodes, version selection, Play/Add to queue, and current queue/start/skip/stop. “Play” starts the queue when idle, and adds to the existing queue during playback. Errors and connectivity state appear inline. Existing local upload/preview management remains available under **Local files**. File deletion and logout now require POST.
-
-Discord examples (use your configured prefix and **provider ID**):
+The canonical Compose file contains exactly one application service, `streambot`, with one `./data:/data` mount. It persists:
 
 ```text
-$media servers
-$media search jellyfin-primary "The Matrix"
-$media search silo-primary "The Matrix"
-$media seasons silo-primary <series-id>
-$media episodes silo-primary <series-id> <season-id>
-$play jellyfin-primary:<movie-id>
-$play silo-primary:<episode-id>
-$queue
-$skip
-$stop
+/data/database/       SQLite settings, users, sessions, rules, queues and playlists
+/data/security/       protected AES-GCM keyring (separate from the database)
+/data/videos/         local uploads (existing ./data/videos stays in place)
+/data/preview-cache/  previews (existing ./data/preview-cache stays in place)
+/data/cache/          writable runtime cache
 ```
 
-Local names, YouTube search/URLs, Twitch, HTTP URLs, header flags and other upstream commands remain available. Queue entries for providers contain stable IDs and optional version, never signed URLs or credentials. URLs/grants resolve when playback reaches that item. Failed items report a safe error and advance; skip/stop abort preparation and streaming and close provider resources before advancing. Playback errors are visible in the dashboard even when playback was started there without a Discord Message.
+The image filesystem is read-only, `/tmp` is bounded scratch space, and the host port binds only to `127.0.0.1:3000`. No Docker socket, privileged mode or media-server database is mounted. The entrypoint briefly initializes application-directory ownership, using only CHOWN/SETUID/SETGID/DAC_OVERRIDE capabilities, then immediately runs Bun and workers as UID/GID **1000** without effective capabilities. It does not recursively change ownership of your media libraries. The non-root process is checked by the container smoke test. Host Docker administrators can still access the container; this does not protect against a compromised host.
 
-FFmpeg still encodes the output required by Discord; source direct play does not guarantee zero encoding. Hardware acceleration is off by default and needs platform-specific device access/configuration. No GPU claim is made for the macOS/Colima host.
-
-## Limits and troubleshooting
-
-- **Live release compatibility is pending verification.** No real Jellyfin movie, Silo episode, Discord audio/video, or expired live session has been tested here. Record deployed versions and run the [live checklist](docs/LIVE_VERIFICATION.md).
-- Default audio only; subtitles are disabled. Track-selection requests are explicitly rejected rather than silently choosing another track. Media versions are supported when returned by item details. There is no seek/resume UI.
-- An initially expired progressive/root playlist grant is renegotiated once. Expiry of an already-running HLS child/segment fails safely; seamless midstream renewal/resume is not implemented. Requeue the item after checking server grant lifetime. Session cleanup uses `DELETE /Videos/ActiveEncodings` with DeviceId/PlaySessionId; errors are reported, and server idle cleanup may still be needed after a crash.
-- No progress or watched-state writeback is sent. Only playback negotiation and teardown mutate server session state. Silo may internally record playback history as part of its own session lifecycle.
-- Media servers on another origin, unsupported HLS constructs and malformed responses fail closed. There is no arbitrary-URL provider proxy. Existing explicit admin URL playback/local remote-upload tools remain privileged upstream capabilities; keep admin access limited.
-- `401`: replace credential or check compatibility login. `403`: account/profile/library/playback permissions. `404`: stale item/version or wrong listener/base path. `429`: bounded GET retries then an actionable error. Offline/TLS/timeout: check from inside the container; negotiation/read deadlines are bounded.
-- Playback preparation supports cancellation. Legacy metadata lookups are bounded from the controller but an underlying third-party extractor may finish its read request in the background; downloaded temporary YouTube files are cleaned and downloads receive cancellation signals.
-- Bun and npm packages are pinned by version/lockfile. Native setup downloads the locked datachannel prebuild and node-av's matching FFmpeg bundle. No `trust --all` is used; reviewed native steps live in `scripts/install-native.mjs`. OS package repositories and upstream native assets are not a fully hermetic/offline build. Audit/pin image digests and mirror native assets for stricter supply-chain requirements.
-- Linux amd64/arm64 and macOS native package availability depend on the upstream streamer. Linux amd64 image build/start is verified in fork CI. Linux arm64 image execution and GPU acceleration remain unverified; rebuild on a healthy host with adequate storage before production use.
-
-## Develop and verify
+For native development:
 
 ```sh
 bun install --frozen-lockfile --ignore-scripts
 bun run setup:native
 bun run build
 bun test
+bun start
 ```
 
-Install FFmpeg/ffprobe and yt-dlp on PATH for host execution; set `YTDLP_PATH` to an installed executable. Docker includes pinned yt-dlp and disables auto-update. For host development, set `FFMPEG_TEST_PATH` if the test executable is elsewhere. Generated test media uses tones/color bars, with no private libraries. The tests check provider DTOs/auth/errors/paging, HLS/redirect policy, grant renewal, queue lifecycle, dashboard auth/Origin controls and command permissions. The real FFmpeg test skips explicitly if neither `/usr/bin/ffmpeg`, the native bundle, nor the configured executable is present.
+Set `DATA_DIR` only if the infrastructure needs another data directory; default is `./data`. `SERVER_HOST`/`SERVER_PORT` are infrastructure bindings. Canonical operation does not require `TOKEN`, `SERVER_PASSWORD`, `SESSION_SECRET`, `ADMIN_IDS`, provider credential variables or JSON config. Bun is required for SQLite and workers; legacy `start:node`, `server:node` and `Dockerfile.node` names are compatibility aliases to the Bun runtime. Dependencies and selected native setup steps are locked; no `trust --all` is used. Runtime assets are bundled locally, with no CDN dependency.
 
-CI builds/tests without live credentials, builds the fork image, and runs an isolated dashboard-only Compose start/restart/persistence smoke test; it does not publish to upstream registries. Both Dockerfiles use the same locked setup; the default uses Bun, while `Dockerfile.node` selects the compiled Node entry point. The Node image has not been runtime-verified here.
+## Upgrade without losing media or tokens
 
-## Source control
+1. Keep a secure backup of the current checkout's `.env`, `config/media-servers.json` and existing `data` directory. Do not delete or recreate media-server volumes.
+2. Check out this feature branch and rebuild the canonical service. The existing `./data/videos` and `./data/preview-cache` paths remain mapped; their contents are not deleted by migration.
+3. Claim the new dashboard administrator. Under **System & Security**, choose your old `.env` and provider JSON files using **Import legacy files through the browser**. Preview the redacted summary, then confirm import. For native installs, server-side legacy files can also be detected automatically and imported after review.
+4. The import preserves provider IDs, copies associated credentials into the encrypted vault, and can create the old Discord configuration as a **stopped** instance. It never starts that account automatically or deletes/overwrites the originals. Review destinations, source access, encoder settings and risk acknowledgement before starting it.
+5. Verify sources and real playback; then remove or rotate the old external credentials at your discretion. Keep an encrypted backup and its separate recovery passphrase. Import is one-time, avoiding accidental re-import loops.
 
-The implementation is on `feat/jellyfin-silo-integration` in [scopeddlol/StreamBot](https://github.com/scopeddlol/StreamBot), with `upstream` retained. To reproduce the fork workflow from an upstream-only checkout:
+Old `./videos` installations should upload or intentionally copy their existing local files into `./data/videos`; the application does not move/delete arbitrary host media paths. Provider filesystem `Path` fields are never treated as local mount paths.
 
-```sh
-gh auth login -h github.com
-gh auth status
-gh repo fork --remote --remote-name origin
-git remote -v
-git push -u origin feat/jellyfin-silo-integration
-```
+## Sources and network safety
 
-Check that the fork belongs to the intended authenticated owner; retain `upstream`. Do not commit deployment credentials/config. Full implementation and verification results are in [implementation notes](docs/IMPLEMENTATION_NOTES.md).
+**Jellyfin:** configure its real API base URL and either a token plus intended viewer ID or username/password login. Server API keys can be broad; use a restricted viewer login where profile restrictions matter.
+
+**Silo:** use its enabled **Jellyfin compatibility listener**, which can be on a different port from native `/api/v2`. Use a compatibility token or documented compatibility login (`account#profile`; `password#pin` only where your deployed version supports it). Native bearer/profile headers are not substituted. Confirm the intended profile, library and playback permissions with the deployed release.
+
+Catalog browsing, authenticated artwork, bounded episode pagination, media-source selection, just-in-time negotiation, root-grant renewal, private gateway transport and nested HLS redirect handling are retained. Provider edits update future handles while active sessions drain; unrelated streams are not restarted. Revocation stops only streams using that source, removes its encrypted credential and refreshes workers. Workers receive only the selected source's required credentials over private IPC at playback time; credentials are not CLI arguments or per-instance environment settings.
+
+Every provider request uses the exact configured origin and a DNS-validated, pinned connection. Redirects stay within that origin; link-local/cloud-metadata/multicast destinations are rejected, including IPv6-mapped metadata addresses. HLS manifests/keys/segments are rewritten through a random, loopback-only per-play gateway. TLS verification stays enabled. Explicit private LAN/Tailscale media origins are supported, but never arbitrary metadata endpoints. For a private CA, provision a trusted certificate/CA at the host/image boundary and verify your Bun/Node TLS configuration; never disable verification.
+
+Generic direct-media URLs must have their exact origin allowed in **System**. They use the same protected gateway and encrypted input storage. YouTube/Twitch extractors remain supported separately. Local files stay confined to the local-video directory. Existing remote-upload HTTP fetching is replaced by browser uploads and streaming from configured direct origins.
+
+## Playlists and requests
+
+Live TV supports movies, episodes, full seasons and deterministic whole-show snapshots (specials excluded by default), bulk selection, version references, drag/keyboard reorder, saved-playlist duplication/selection, reference-only import/export, sequential/shuffle ordering and repeat **off / one / all**. Shuffle order is stable within a cycle and persisted. Private URL inputs are excluded from reference exports. A pending on-demand/play-now queue can interrupt a live playlist without resetting its cursor.
+
+Completion advances the persistent checkpoint. Skip aborts preparation/encoding, closes the media session and advances once. Stop preserves queue/checkpoint for restart; **Clear queue** is a separate confirmed operation. After recovery, the interrupted item restarts from the beginning with the same reference; frame-accurate seeking is not implemented. Per-item retries/backoff and a consecutive-failure limit prevent broken channels from spinning indefinitely. Empty playlists remain idle; there is no mandatory standby-media service. This is continuous playback, not a clock-based EPG scheduler.
+
+Official commands include `/watch`, `/queue`, `/nowplaying`, `/skip`, `/room`, `/request-cancel` and `/recommend`. `/watch` guides selection through real matches, seasons/episodes and confirmation into an authorized on-demand room. Requests support staff approval, current-VC requirements, cooldowns, per-request/daily item limits and own pending cancellation. Commands refresh membership/roles before actions and use ephemeral responses. Request state tracks queue/playback completion.
+
+Optional legacy prefix commands are scoped to a configured command channel and routed through the same permission policy: `play`, `media search`, `queue`, `skip`, `stop`, and `status`. Local names, URLs, YouTube queries and explicit `provider-id:item-id` references remain available. The old standalone account bootstrap is no longer the normal entry point. Legacy raw header flags and old file-management prefix commands are not activated in the new router; enter server credentials through the panel and manage local files there.
+
+## Permissions and security
+
+Web owner/admin/operator/viewer roles and guild/Discord-role/user/instance/action rules are enforced server-side for web, Discord and AI. The owner retains recovery control. Otherwise precedence is **explicit user deny → user allow → role deny → role allow → guild default → web-role default → deny**. Applicable user denies override generic allows; conflicting role denies win. A Discord Administrator flag or role name is never an authorization shortcut. Cross-guild room access is denied and fresh membership verification fails closed.
+
+The owner can create web users; permissions are edited as explicit rules in the panel. Viewer defaults permit library/instance/queue reads, operator defaults add operational controls, and admin adds configuration. An application-level read grant is deliberately broader than a room-scoped grant. Credential metadata is visible only to the appropriate management role; plaintext values are never returned. Destructive operations require confirmation, with audit records containing actor/action/target/outcome rather than payloads.
+
+Passwords use Argon2id. Database sessions use hashed random tokens, eight-hour absolute/30-minute idle expiry, HttpOnly/SameSite Strict cookies and revocation. State changes require exact Origin and reject cross-site requests. Authentication and mutation rates are bounded. Sensitive configuration over non-local plain HTTP is rejected. For a trusted HTTPS reverse proxy, set the exact dashboard origin and trusted proxy IP/CIDR in **System**; Secure cookies follow that origin. A proxy container needs a suitable private shared network; it cannot use the host's loopback port as its own localhost. Initial onboarding must be reached locally or through an SSH tunnel. DNS, TLS termination, firewall rules, port publication and GPU-device exposure remain explicit host prerequisites.
+
+The vault uses fresh AES-256-GCM nonces and authenticated record ID/purpose/owner/version. The keyring is owner-only and separate from the DB. Missing/corrupt keys with ciphertext fail closed and never silently reset. Key rotation retains older key material for crash-safe transition. Backups are passphrase-encrypted envelopes containing the DB and key material; media files are separate. Restore requires explicit owner confirmation and all workers/command connections stopped, replaces configuration/accounts and revokes sessions. Keep backups/passphrases separately: loss of both key material and a recoverable encrypted backup makes credentials unrecoverable. A lost-key installation may need a fresh data directory plus an explicitly confirmed encrypted-backup restore; preserve the original directory for recovery.
+
+## Optional AI
+
+AI is off until configured. Use a Chat-Completions/tool-compatible endpoint and model, not a Responses-only model. The adapter follows the [official request/tool format](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create). Private compatible endpoints require an explicit opt-in; metadata endpoints are always blocked. No model server/container is installed.
+
+Every catalog tool call is permission checked. Only allowlisted read tools are available; the model cannot grant roles, read secrets, call arbitrary URLs or queue anything. Returned keys are intersected with actual catalog results and playback requires ordinary selection/confirmation. Prompts/results are bounded, tool rounds are capped, daily token/call reservations and per-user requests are limited, and conversations are not retained. Library URLs, profile credentials and signed grants are not sent to the model. Unconfigured AI falls back to catalog search; API errors do not block core playback. Provider pricing/spend should also be constrained in the provider account—local token reservation is conservative, not an invoice estimate.
+
+## Verification and limits
+
+Local build and **51 tests / 269 assertions** pass, including the original provider/gateway regressions, persistence/vault/onboarding, worker isolation, account/destination conflicts, request/RBAC/AI checks, encrypted backup recovery, legacy migration and real generated-media FFmpeg transport. Eight stopped fixture rooms (six live/two on demand) were created through the actual browser UI. Actual child-process mock workers were started independently, including a ninth after raising the cap. These are not live Discord successes.
+
+Short 160×90 generated tone/color fixtures were encoded concurrently at 2/4/8 processes. CPU and peak-RSS aggregates are recorded in implementation notes; this is not a sustained HD throughput or GPU capacity claim. Worker RSS caps cover the Bun process, not aggregate FFmpeg descendants. Concurrency caps and encoder settings bound work; use host/cgroup limits for hard system-wide resource isolation.
+
+Real Discord command installation, account voice/video delivery, Jellyfin movie/Silo episode streaming, permission behavior on a deployed guild, long grant expiry, GPU encoding and Linux arm64 runtime still require operator credentials/infrastructure. Default audio is retained and subtitles remain off; per-track switching, pause, frame-accurate resume, vote-skip and clock schedules are not implemented. Full production acceptance remains conditional on [live verification](docs/LIVE_VERIFICATION.md). See [implementation notes](docs/IMPLEMENTATION_NOTES.md) for current build/CI results and architecture.

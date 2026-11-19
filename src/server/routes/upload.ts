@@ -8,7 +8,7 @@ import logger from '../../utils/logger.js';
 import { upload } from '../middleware/multer.js';
 
 const router = Router();
-const agent = new https.Agent({ rejectUnauthorized: false });
+const agent = new https.Agent();
 
 // Upload route - local file with progress support
 router.post("/api/upload", upload.single("file"), (req, res) => {

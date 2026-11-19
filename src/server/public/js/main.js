@@ -424,7 +424,13 @@ function showDeleteModal(fileName, deleteUrl) {
 	fileNameElement.textContent = fileName;
 
 	
-	confirmBtn.href = deleteUrl;
+	confirmBtn.href = '#';
+  confirmBtn.onclick = async (event) => {
+    event.preventDefault();
+    const response = await fetch(deleteUrl, { method: 'POST' });
+    if (response.ok) window.location.assign('/');
+    else showErrorToast('Unable to delete this file');
+  };
 
 	
 	confirmBtn.addEventListener('click', function (e) {

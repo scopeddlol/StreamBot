@@ -21,7 +21,7 @@ export default class QueueCommand extends BaseCommand {
 		if (queueStatus.isPlaying && currentItem) {
 			const status = currentItem.resolved ? '▶️' : '⏳';
 			const title = currentItem.resolved ? currentItem.title : `${currentItem.title} (resolving...)`;
-			queueText += `${status} **Currently Playing:**\n\`${title}\` (requested by ${currentItem.requestedBy})\n\n`;
+			queueText += `${status} **Currently Playing:**\n\`${title}\` [${currentItem.providerName || currentItem.type}] (requested by ${currentItem.requestedBy})\n\n`;
 		}
 
 		queueText += '**Up Next:**\n';
@@ -41,7 +41,7 @@ export default class QueueCommand extends BaseCommand {
 				const addedTime = item.addedAt.toLocaleTimeString();
 				const status = item.resolved ? '' : '⏳';
 				const title = item.resolved ? item.title : `${item.title} (pending)`;
-				queueText += `${position + 1}. ${status} \`${title}\` (by ${item.requestedBy}) - Added at ${addedTime}\n`;
+				queueText += `${position + 1}. ${status} \`${title}\` [${item.providerName || item.type}] (by ${item.requestedBy}) - Added at ${addedTime}\n`;
 			});
 		}
 

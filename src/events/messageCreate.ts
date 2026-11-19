@@ -17,6 +17,9 @@ export async function handleMessageCreate(
 		!message.content.startsWith(config.prefix)
 	) return;
 
+  // All command adapters share the same authorization boundary.
+  if (message.guild?.id !== config.guildId || message.channel.id !== config.cmdChannelId || !config.adminIds.includes(message.author.id)) return;
+
 	// Split command and arguments
 	const args = message.content.slice(config.prefix!.length).trim().split(/ +/);
 

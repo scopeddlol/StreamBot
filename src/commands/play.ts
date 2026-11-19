@@ -51,6 +51,13 @@ export default class PlayCommand extends BaseCommand {
 			return;
 		}
 
+    // Explicit media references never enter the generic URL/YouTube resolver.
+    const reference = input.match(/^([a-zA-Z0-9_-]+):([a-zA-Z0-9_-]+)$/);
+    if (reference) {
+      await context.streamingService.playProvider(context.message, reference[1], reference[2]);
+      return;
+    }
+
 		// Check if input is a URL (YouTube, Twitch, or direct link)
 		if (GeneralUtils.isValidUrl(input)) {
 			await this.handleUrl(context, input, headers);

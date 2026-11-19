@@ -68,9 +68,9 @@
 
 	<% if (typeof showLogout !== 'undefined' && showLogout) { %>
 	<div class="logout-button">
-		<a href="/logout" class="btn btn-danger">
+		<form method="post" action="/logout"><button type="submit" class="btn btn-danger">
 			<i class="fas fa-sign-out-alt me-1" aria-hidden="true"></i>Logout
-		</a>
+		</button></form>
 	</div>
 	<% } %>
 

@@ -5,6 +5,9 @@ import config from '../../config.js';
 import logger from '../../utils/logger.js';
 
 const router = Router();
+// Single-process dashboard: bounded login attempt window (not keyed by attacker input).
+let attempts = 0;
+let resetAt = 0;
 
 // Login route - GET
 router.get("/login", (req, res) => {
@@ -16,7 +19,10 @@ router.get("/login", (req, res) => {
 
 // Login route - POST
 router.post("/login", async (req, res) => {
-	const { username, password } = req.body;
+	if (Date.now() > resetAt) { attempts = 0; resetAt = Date.now() + 60000; }
+  if (++attempts > 20) { res.status(429).send('Too many attempts; retry in one minute'); return; }
+  const { username, password } = req.body || {};
+  if (typeof username !== 'string' || typeof password !== 'string' || password.length > 1024) { res.status(400).end(); return; }
 	
 	let isPasswordMatch = false;
 	
@@ -38,15 +44,17 @@ router.post("/login", async (req, res) => {
 	}
 	
 	if (username === config.server_username && isPasswordMatch) {
-		(req.session as { user?: unknown }).user = username;
-		res.redirect("/");
+		await new Promise<void>((resolve, reject) => req.session.regenerate(error => error ? reject(error) : resolve()));
+    (req.session as { user?: unknown }).user = username;
+    await new Promise<void>((resolve, reject) => req.session.save(error => error ? reject(error) : resolve()));
+    res.redirect("/library");
 	} else {
 		res.redirect("/login?error=1");
 	}
 });
 
 // Logout route
-router.get("/logout", (req, res) => {
+router.post("/logout", (req, res) => {
 	req.session.destroy((err) => {
 		if (err) {
 			logger.error("Error destroying session:", err);

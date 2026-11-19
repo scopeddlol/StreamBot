@@ -12,15 +12,19 @@ import { handleVoiceStateUpdate } from './events/voiceStateUpdate.js';
 
 // Import services
 import { StreamingService } from './services/streaming.js';
-import { MediaService } from './services/media.js';
 import { CommandManager } from './commands/manager.js';
 import { QueueService } from './services/queue.js';
+
+// Validate before any authenticated connection; values are never logged.
+if (!config.token || !config.guildId || !config.videoChannelId || !config.cmdChannelId || !config.prefix || !config.adminIds.length) {
+  throw new Error('Configure TOKEN, PREFIX, GUILD_ID, VIDEO_CHANNEL_ID, COMMAND_CHANNEL_ID and ADMIN_IDS');
+}
 
 // Download yt-dlp and check for updates
 (async () => {
 	try {
 		await downloadExecutable();
-		await checkForUpdatesAndUpdate();
+		if (process.env.YTDLP_AUTO_UPDATE === 'true') await checkForUpdatesAndUpdate();
 	} catch (error) {
 		logger.error("Error during initial yt-dlp setup/update:", error);
 	}
@@ -46,7 +50,6 @@ const streamStatus = {
 
 // Create services
 const streamingService = new StreamingService(client, streamStatus);
-const mediaService = new MediaService();
 const commandManager = new CommandManager();
 
 // Create the videosFolder dir if it doesn't exist
@@ -73,11 +76,6 @@ let videos = videoFiles.map(file => {
 	return { name: fileName, path: path.join(config.videosDir, file) };
 });
 
-// Print available videos
-if (videos.length > 0) {
-	logger.info(`Available videos:\n${videos.map(m => m.name).join('\n')}`);
-}
-
 // Event handlers
 client.on("ready", async () => {
 	await handleReady(client);
@@ -91,19 +89,25 @@ client.on('messageCreate', async (message) => {
 	await handleMessageCreate(message, videos, streamStatus, streamingService, commandManager);
 });
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-	if (!(error instanceof Error && error.message.includes('SIGTERM'))) {
-		logger.error('Uncaught Exception:', error);
-		return
-	}
-});
-
 // Run server if enabled in config
 if (config.server_enabled) {
 	// Run server.ts
-	import('./server/index.js');
+	const { startServer } = await import('./server/index.js');
+	const server = startServer(streamingService.providers, streamingService);
+	process.on('SIGTERM', () => server.close());
+	process.on('SIGINT', () => server.close());
 }
 
-// Login to Discord
-client.login(config.token);
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const deadline = setTimeout(() => process.exit(1), 25000); deadline.unref();
+  await streamingService.stopAndClearQueue();
+  client.destroy();
+  clearTimeout(deadline);
+  process.exit(0);
+}
+process.once('SIGTERM', shutdown);
+process.once('SIGINT', shutdown);
+client.login(config.token).catch(() => { logger.error('Discord login failed; check TOKEN privately'); process.exit(1); });

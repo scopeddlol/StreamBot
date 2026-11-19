@@ -12,6 +12,7 @@ const router = Router();
 // Preview route
 router.get("/preview/:file", (req, res) => {
 	const file = req.params.file;
+  if (typeof file !== 'string' || path.basename(file) !== file || file.includes('\\')) { res.status(400).end(); return; }
 	if (!fs.existsSync(path.join(config.videosDir, file))) {
 		res.status(404).send("Not Found");
 		return;
@@ -42,10 +43,11 @@ router.get("/preview/:file", (req, res) => {
 // Generate preview of video file using ffmpeg, cache it to previewCache and serve it
 router.get("/api/preview/:file/:id", async (req, res) => {
 	const file = req.params.file;
+  if (typeof file !== 'string' || path.basename(file) !== file || file.includes('\\')) { res.status(400).end(); return; }
 	const id = parseInt(req.params.id, 10);
 
 	// id should be 1, 2, 3, 4 or 5
-	if (id < 1 || id > 5) {
+	if (!Number.isInteger(id) || id < 1 || id > 5) {
 		res.status(404).send("Not Found");
 		return;
 	}
@@ -67,8 +69,9 @@ router.get("/api/preview/:file/:id", async (req, res) => {
 });
 
 // Delete route
-router.get("/delete/:file", (req, res) => {
+router.post("/delete/:file", (req, res) => {
 	const file = req.params.file;
+  if (typeof file !== 'string' || path.basename(file) !== file || file.includes('\\')) { res.status(400).end(); return; }
 	const filePath = path.join(config.videosDir, file);
 
 	if (fs.existsSync(filePath)) {

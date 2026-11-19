@@ -4,7 +4,8 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
 	if ((req.session as { user?: unknown }).user) {
 		next();
 	} else {
-		res.redirect("/login");
+		if (req.path.startsWith("/api/")) res.status(401).json({ error: "Authentication required" });
+		else res.redirect("/login");
 	}
 };
 

@@ -1,39 +1,43 @@
+import { randomUUID } from 'node:crypto';
 import { registerSecret } from '../utils/redact.js';
 import { allowedUrl, fetchAllowed, mediaId, statusError, validateBaseUrl } from './security.js';
-import { MediaItem, MediaKind, MediaProvider, PlayableReference, ProviderConfig, ProviderError, ResolvedPlayback, SearchOptions } from './types.js';
+import { ProviderCredentials, MediaItem, MediaKind, MediaProvider, PlayableReference, ProviderConfig, ProviderError, ResolvedPlayback, SearchOptions } from './types.js';
 import { openGateway } from './gateway.js';
 
 const kinds: Record<string, MediaKind> = { Movie: 'movie', Series: 'series', Season: 'season', Episode: 'episode' };
 const apiKinds: Record<MediaKind, string> = { movie: 'Movie', series: 'Series', season: 'Season', episode: 'Episode' };
-const deviceId = 'streambot-media-v1';
-const deviceAuth = 'MediaBrowser Client="StreamBot", Device="StreamBot", DeviceId="streambot-media-v1", Version="1.0"';
 
 export class JellyfinCompatibleClient implements MediaProvider {
   readonly base: URL;
+  private readonly deviceId = 'streambot-' + randomUUID();
+  private get deviceAuth() { return `MediaBrowser Client="StreamBot", Device="StreamBot", DeviceId="${this.deviceId}", Version="1.0"`; }
   private token: string;
   private userId?: string;
   private loginPending?: Promise<void>;
-  constructor(readonly config: ProviderConfig) {
+  private credentials: () => ProviderCredentials;
+  constructor(readonly config: ProviderConfig, credentials?: () => ProviderCredentials) {
+    this.credentials = credentials || (() => ({ token: config.credentialEnv ? process.env[config.credentialEnv] : undefined,
+      username: config.usernameEnv ? process.env[config.usernameEnv] : undefined, password: config.passwordEnv ? process.env[config.passwordEnv] : undefined }));
     this.base = validateBaseUrl(config.baseUrl);
-    this.token = config.credentialEnv ? process.env[config.credentialEnv] || '' : '';
+    this.token = this.credentials().token || '';
     this.userId = config.userId;
     registerSecret(this.token);
-    for (const name of [config.usernameEnv, config.passwordEnv]) if (name && process.env[name]) registerSecret(process.env[name]!);
+    for (const value of Object.values(this.credentials())) if (value) registerSecret(value);
     if (this.token && /[\r\n]/.test(this.token)) throw new ProviderError('Credential contains invalid characters', 400);
-    if (!this.token && !(config.usernameEnv && process.env[config.usernameEnv] && config.passwordEnv && process.env[config.passwordEnv])) {
+    if (!this.token && !(this.credentials().username && this.credentials().password)) {
       throw new ProviderError(`Missing credential environment variables for provider ${config.id}`, 400);
     }
   }
   private headers(): Record<string, string> {
-    return { 'X-Emby-Authorization': deviceAuth, ...(this.token ? { 'X-Emby-Token': this.token } : {}) };
+    return { 'X-Emby-Authorization': this.deviceAuth, ...(this.token ? { 'X-Emby-Token': this.token } : {}) };
   }
   private async login(signal?: AbortSignal): Promise<void> {
-    if (!this.config.usernameEnv || !this.config.passwordEnv) throw statusError(401);
+    if (!this.credentials().username || !this.credentials().password) throw statusError(401);
     if (!this.loginPending) {
       this.loginPending = (async () => {
         const response = await fetchAllowed(new URL('Users/AuthenticateByName', this.base), this.base, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Emby-Authorization': deviceAuth },
-          body: JSON.stringify({ Username: process.env[this.config.usernameEnv!], Pw: process.env[this.config.passwordEnv!] }),
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Emby-Authorization': this.deviceAuth },
+          body: JSON.stringify({ Username: this.credentials().username, Pw: this.credentials().password }),
           signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
         });
         const data = await this.readJson(response);
@@ -70,7 +74,7 @@ export class JellyfinCompatibleClient implements MediaProvider {
         method, headers: { ...this.headers(), 'Content-Type': 'application/json' },
         body: options.body ? JSON.stringify(options.body) : undefined, signal,
       });
-      if (response.status === 401 && attempt === 0 && this.config.usernameEnv) {
+      if (response.status === 401 && attempt === 0 && this.credentials().username) {
         await response.body?.cancel(); await this.login(options.signal); continue;
       }
       if (method === 'GET' && [429, 502, 503, 504].includes(response.status) && attempt < 2) {
@@ -139,14 +143,13 @@ export class JellyfinCompatibleClient implements MediaProvider {
     const userId = await this.identity();
     return this.normalize(await this.request(`Users/${userId}/Items/${mediaId(id)}`, { query: { Fields: 'Overview,MediaSources' } }));
   }
-  async getSeasons(id: string) {
-    const data = await this.request(`Shows/${mediaId(id)}/Seasons`, { query: { UserId: await this.identity() } });
-    return (data.Items || []).map((item: any) => this.normalize(item));
+  private async pages(route:string,query:Record<string,string>,max=2000):Promise<MediaItem[]> {
+    const items:MediaItem[]=[];const seen=new Set<string>();
+    for(let offset=0;offset<max;offset+=100){const data=await this.request(route,{query:{...query,StartIndex:String(offset),Limit:'100'}});const page=data.Items||[];for(const raw of page){const item=this.normalize(raw);if(seen.has(item.id))throw new ProviderError('Provider repeated a catalog page; verify server pagination support');seen.add(item.id);items.push(item);}if(!page.length||typeof data.TotalRecordCount!=='number'||items.length>=data.TotalRecordCount)return items;}
+    throw new ProviderError('Catalog expansion exceeds the bounded item limit; add smaller seasons instead');
   }
-  async getEpisodes(id: string, seasonId?: string) {
-    const data = await this.request(`Shows/${mediaId(id)}/Episodes`, { query: { UserId: await this.identity(), ...(seasonId ? { SeasonId: mediaId(seasonId) } : {}) } });
-    return (data.Items || []).map((item: any) => this.normalize(item));
-  }
+  async getSeasons(id: string) { return this.pages(`Shows/${mediaId(id)}/Seasons`,{UserId:await this.identity()},500); }
+  async getEpisodes(id: string, seasonId?: string) { return this.pages(`Shows/${mediaId(id)}/Episodes`,{UserId:await this.identity(),...(seasonId?{SeasonId:mediaId(seasonId)}:{})}); }
   async artwork(id: string) {
     if (!this.token) await this.login();
     const response = await fetchAllowed(new URL(`Items/${mediaId(id)}/Images/Primary?maxWidth=400`, this.base), this.base,
@@ -170,7 +173,7 @@ export class JellyfinCompatibleClient implements MediaProvider {
       if (!sessionId) return;
       const current = sessionId; sessionId = undefined;
       // Teardown only: no progress, watched state, or library mutations.
-      await this.request('Videos/ActiveEncodings', { method: 'DELETE', query: { DeviceId: deviceId, PlaySessionId: current } });
+      await this.request('Videos/ActiveEncodings', { method: 'DELETE', query: { DeviceId: this.deviceId, PlaySessionId: current } });
     };
     const negotiate = async () => {
       await closeSession().catch(() => {});

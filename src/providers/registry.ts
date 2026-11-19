@@ -1,12 +1,14 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { JellyfinProvider } from './jellyfin.js';
 import { SiloProvider } from './silo.js';
-import { MediaProvider, ProviderConfig, ProviderError } from './types.js';
+import { ProviderCredentials, MediaProvider, ProviderConfig, ProviderError } from './types.js';
 import { mediaId, validateBaseUrl } from './security.js';
 
 export class ProviderRegistry {
+  private fingerprints = new Map<string,string>();
   private providers = new Map<string, MediaProvider>();
-  constructor(configs: ProviderConfig[] = []) {
+  constructor(configs: ProviderConfig[] = [], credentials?: (config: ProviderConfig) => () => ProviderCredentials) {
     for (const config of configs) {
       if (!config || typeof config !== 'object') throw new ProviderError('Each provider must be a configuration object', 400);
       if (Object.keys(config).some(key => !['id', 'name', 'kind', 'baseUrl', 'credentialEnv', 'userId', 'usernameEnv', 'passwordEnv'].includes(key))) throw new ProviderError('Unknown provider config field; store credentials in environment variables', 400);
@@ -20,8 +22,12 @@ export class ProviderRegistry {
         if (value !== undefined && !/^[A-Z][A-Z0-9_]*$/.test(value)) throw new ProviderError('Credential fields must name environment variables', 400);
       }
       if (config.credentialEnv && (config.usernameEnv || config.passwordEnv)) throw new ProviderError('Choose token OR login authentication', 400);
-      this.providers.set(config.id, config.kind === 'silo' ? new SiloProvider(config) : new JellyfinProvider(config));
+      this.fingerprints.set(config.id,createHash('sha256').update(JSON.stringify([config,credentials?.(config)()])).digest('hex'));
+      this.providers.set(config.id, config.kind === 'silo' ? new SiloProvider(config, credentials?.(config)) : new JellyfinProvider(config, credentials?.(config)));
     }
+  }
+  replace(configs: ProviderConfig[], credentials: (config: ProviderConfig) => () => ProviderCredentials) {
+    const next = new ProviderRegistry(configs, credentials);for(const [id,provider] of this.providers)if(next.fingerprints.get(id)===this.fingerprints.get(id)&&next.providers.has(id))next.providers.set(id,provider);this.providers = next.providers;this.fingerprints=next.fingerprints;
   }
   all() { return [...this.providers.values()]; }
   get(id: string) {

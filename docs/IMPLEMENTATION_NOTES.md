@@ -45,3 +45,10 @@ Jellyfin playback controller source: https://github.com/jellyfin/jellyfin/blob/m
 - CI https://github.com/scopeddlol/StreamBot/actions/runs/44460057666 passed at `2f0fd14`: locked install, build/tests, Linux amd64 image build, native streaming import, Bun/FFmpeg/ffprobe/yt-dlp checks, isolated dashboard-only Compose start, restart, persistent video/cache/config mounts, and shutdown. No image was published to upstream registries.
 - Follow-up regression fix resolves HLS children relative to the final allowlisted redirect URL, with a dedicated nested-manifest test. Build and complete suite rerun before push; latest branch CI tracks the final revision.
 - Live Discord output, real Jellyfin/Silo content/profile behavior, prolonged grant expiry, real FFmpeg SIGTERM during Discord playback, Linux arm64 container execution, and GPU behavior remain unverified. These require operator infrastructure; use LIVE_VERIFICATION.md. Full production acceptance is conditional on those checks.
+
+## StreamBot TV baseline (2026-11-19)
+
+- Continued on the same fork/feature branch; fetched origin and confirmed HEAD `7d0924755df132098ded2aabf1677a0849d02a30` has no newer branch commits or local changes.
+- Bun 1.3.10 locked install and TypeScript build pass. Existing regression suite: 28 passed, 103 assertions, including real generated-media FFmpeg transport.
+- Existing provider/gateway/transport implementation is retained. New canonical runtime will use Bun SQLite WAL, a private AES-GCM keyring, database sessions, browser configuration and child-process workers. Legacy server exports remain regression-compatible; canonical startup changes to the integrated TV runtime.
+- Host has ~3.7 GiB free. Container verification will use fork CI rather than risk filling the local Docker VM again.

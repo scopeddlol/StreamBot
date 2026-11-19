@@ -1,3 +1,8 @@
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+import http from 'node:http';
+import https from 'node:https';
+import { Readable } from 'node:stream';
 import { ProviderError } from './types.js';
 
 export function validateBaseUrl(value: string): URL {
@@ -28,7 +33,7 @@ export async function fetchAllowed(url: URL, base: URL, init: RequestInit = {}):
   let target = allowedUrl(url.href, base);
   try {
     for (let redirects = 0; redirects <= 3; redirects++) {
-      const response = await fetch(target, { ...init, redirect: 'manual' });
+      const response = await pinnedFetch(target, init);
       if (response.status >= 300 && response.status < 400 && response.headers.has('location')) {
         await response.body?.cancel();
         target = allowedUrl(new URL(response.headers.get('location')!, target).href, base);
@@ -52,4 +57,41 @@ export function statusError(status: number): ProviderError {
     429: 'Provider rate limited requests; retry shortly',
   };
   return new ProviderError(messages[status] || 'Provider failed to serve this request', status >= 400 && status < 500 ? status : 502);
+}
+
+export async function networkAddresses(url: URL, allowPrivate = true) {
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  if (/^(metadata|metadata\.google\.internal|instance-data)(\.|$)/i.test(host)) throw new ProviderError('Metadata destinations are not allowed');
+  const addresses = isIP(host) ? [{ address: host, family: isIP(host) }] : await lookup(host, { all: true });
+  for (const { address } of addresses) {
+    const ip = address.toLowerCase();
+    const mapped = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
+    if (/^(169\.254\.|0\.|224\.|255\.)/.test(mapped) || mapped === '100.100.100.200' || /^(fe[89ab]|ff)/.test(ip) || ip === '::') throw new ProviderError('Link-local, metadata and multicast destinations are not allowed');
+    if (!allowPrivate && (/^(10\.|127\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(mapped) || ip === '::1' || /^f[cd]/.test(ip))) throw new ProviderError('Private AI endpoints require explicit private-network permission');
+  }
+  if (!addresses.length) throw new ProviderError('Provider DNS returned no addresses');
+  return addresses;
+}
+async function pinnedFetch(url: URL, init: RequestInit) {
+  if (init.signal?.aborted) throw new ProviderError('Provider request cancelled or timed out',504);
+  const addresses = await networkAddresses(url);
+  return new Promise<Response>((resolve, reject) => {
+    const target = addresses[0];
+    const request = (url.protocol === 'https:' ? https : http).request(url, {
+      method: init.method || 'GET', headers: Object.fromEntries(new Headers(init.headers).entries()),
+      lookup: ((_hostname: string, options: any, callback: any) => options.all ? callback(null, [target]) : callback(null, target.address, target.family)) as any,
+    }, incoming => {
+      const headers = new Headers(); for (const [name, value] of Object.entries(incoming.headers)) if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(', ') : value);
+      const empty = init.method === 'HEAD' || [204,304].includes(incoming.statusCode!);
+      const response = new Response(empty ? null : Readable.toWeb(incoming) as any, { status: incoming.statusCode, headers });
+      Object.defineProperty(response, 'url', { value: url.href });
+      if (empty) incoming.resume(); resolve(response);
+    });
+    const abort = () => { request.destroy(); reject(new ProviderError('Provider request cancelled or timed out',504)); };
+    init.signal?.addEventListener('abort', abort, { once: true });
+    request.once('close', () => init.signal?.removeEventListener('abort', abort));
+    request.once('error', reject);
+    if (init.signal?.aborted) { abort(); return; }
+    if (init.body) request.write(init.body); request.end();
+  });
 }

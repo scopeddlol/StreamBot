@@ -1,3 +1,4 @@
+export interface ProviderCredentials { token?: string; username?: string; password?: string }
 export type ProviderKind = 'jellyfin' | 'silo';
 export type MediaKind = 'movie' | 'series' | 'season' | 'episode';
 export interface ProviderConfig {

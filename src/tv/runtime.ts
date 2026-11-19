@@ -15,6 +15,10 @@ import { Backups } from "./backups.js";
 import { LegacyImport } from "./migration.js";
 export class TVRuntime {
   private closing = false;
+  private shutdownPromise?: Promise<boolean>;
+  get isClosing() {
+    return this.closing;
+  }
   store: AppStore;
   vault: Vault;
   auth: Auth;
@@ -158,8 +162,15 @@ export class TVRuntime {
       if (!this.closing) await this.discord.start(id).catch(() => {});
     await workers;
   }
-  async shutdown() {
-    this.closing = true;
+  shutdown(): Promise<boolean> {
+    if (!this.shutdownPromise) {
+      this.closing = true;
+      this.instances.emit("shutdown");
+      this.shutdownPromise = this.finishShutdown();
+    }
+    return this.shutdownPromise;
+  }
+  private async finishShutdown() {
     const results = await Promise.allSettled([
       this.discord.shutdown(),
       this.instances.shutdown(),

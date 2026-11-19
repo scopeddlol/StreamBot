@@ -111,3 +111,29 @@ test("zero-config HTTP onboarding, protected metadata, persistent sessions, eigh
     await cleanup();
   }
 }, 20000);
+
+test("shutdown ends authenticated event streams before closing SQLite", async () => {
+  const { runtime: r, code, cleanup } = fixture();
+  const session = await r.auth.claim(
+    code,
+    "fixture-owner",
+    "fixture-password-long-enough",
+  );
+  const server = createTVApp(r).listen(0, "127.0.0.1");
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${(server.address() as any).port}/api/v1/events`,
+      { headers: { Cookie: `streambot.tv=${session}` } },
+    );
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    await r.shutdown();
+    expect((await reader.read()).done).toBe(true);
+    expect(r.instances.listenerCount("shutdown")).toBe(0);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    await cleanup();
+  }
+});

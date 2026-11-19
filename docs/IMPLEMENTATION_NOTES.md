@@ -75,3 +75,7 @@ Jellyfin playback controller source: https://github.com/jellyfin/jellyfin/blob/m
 - Real Discord interactions/role revocation and audio/video, actual Jellyfin/Silo releases/profile access, long expiry, GPU and Linux arm64 remain operator gates. No live credentials supplied. Track selection/pause/vote-skip/clock schedules/frame-accurate seek are not implemented; continuous playlists, default audio and subtitles-off behavior are explicit.
 
 - TV container CI at `94073a4`: https://github.com/scopeddlol/StreamBot/actions/runs/44471962761 — passed locked install, build/tests, image build, native import and the no-config onboarding/non-root/restart smoke test. A final follow-up awaits the pinned SDK's asynchronous disconnect and prevents startup work from reopening connections during shutdown; its regression raises the local suite to 52 tests / 270 assertions. The delivery report links CI for the exact final revision.
+
+### Graceful dashboard shutdown regression
+
+A browser event stream exposed an SQLite access after shutdown. Runtime shutdown now closes event streams and removes their timers/listeners before closing SQLite, and repeated shutdown calls share one promise. The regression test passes; the complete suite is 53 tests / 273 assertions. The container smoke keeps an authenticated event stream open during stop, requires exit code zero, then verifies persisted state after start.

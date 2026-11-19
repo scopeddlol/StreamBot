@@ -105,7 +105,7 @@ Every catalog tool call is permission checked. Only allowlisted read tools are a
 
 ## Verification and limits
 
-Local build and **52 tests / 270 assertions** pass, including the original provider/gateway regressions, persistence/vault/onboarding, worker isolation, account/destination conflicts, request/RBAC/AI checks, encrypted backup recovery, legacy migration and real generated-media FFmpeg transport. Eight stopped fixture rooms (six live/two on demand) were created through the actual browser UI. Actual child-process mock workers were started independently, including a ninth after raising the cap. These are not live Discord successes.
+Local build and **53 tests / 273 assertions** pass, including the original provider/gateway regressions, persistence/vault/onboarding, worker isolation, account/destination conflicts, request/RBAC/AI checks, encrypted backup recovery, legacy migration and real generated-media FFmpeg transport. Eight stopped fixture rooms (six live/two on demand) were created through the actual browser UI. Actual child-process mock workers were started independently, including a ninth after raising the cap. These are not live Discord successes.
 
 Short 160×90 generated tone/color fixtures were encoded concurrently at 2/4/8 processes. CPU and peak-RSS aggregates are recorded in implementation notes; this is not a sustained HD throughput or GPU capacity claim. Worker RSS caps cover the Bun process, not aggregate FFmpeg descendants. Concurrency caps and encoder settings bound work; use host/cgroup limits for hard system-wide resource isolation.
 

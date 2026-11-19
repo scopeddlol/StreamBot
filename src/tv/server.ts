@@ -1060,25 +1060,35 @@ export function createTVApp(runtime: TVRuntime) {
   });
   route("get", "/api/v1/events", undefined, (req, res) => {
     policy.require(req.actor, "instance.view");
+    if (runtime.isClosing)
+      throw new AppError("SHUTTING_DOWN", "Application is stopping", 503);
     res.set({
       "Content-Type": "text/event-stream",
       Connection: "keep-alive",
       "Cache-Control": "no-store",
     });
     res.flushHeaders();
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      clearInterval(timer);
+      runtime.instances.off("change", send);
+      runtime.instances.off("shutdown", close);
+      res.end();
+    };
     const send = () => {
-      if (!auth.user(req.sessionToken)) {
-        res.end();
+      if (runtime.isClosing || !auth.user(req.sessionToken)) {
+        close();
         return;
       }
       res.write("event: refresh\ndata: {}\n\n");
     };
-    runtime.instances.on("change", send);
     const timer = setInterval(send, 15000);
-    req.on("close", () => {
-      clearInterval(timer);
-      runtime.instances.off("change", send);
-    });
+    runtime.instances.on("change", send);
+    runtime.instances.on("shutdown", close);
+    res.on("close", close);
+    req.on("close", close);
   });
   // Preserve catalog view and local files within the authenticated application.
   Object.assign(config, {

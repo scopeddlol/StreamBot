@@ -1,1 +1,28 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StreamBot TV</title><link rel="stylesheet" href="/tv/tv.css"></head><body><a class="skip" href="#content">Skip to content</a><div id="shell"><aside><a class="brand" href="/">◉ StreamBot <b>TV</b></a><p class="eyebrow">YOUR PRIVATE BROADCAST DESK</p><nav id="nav"></nav><div class="aside-foot"><span class="dot"></span> Single container · local control<br><small>Video transport may be experimental.</small></div></aside><main id="content"><header><div><p class="eyebrow" id="breadcrumb">WELCOME TO YOUR STATION</p><h1 id="title">StreamBot TV</h1></div><button id="logout" class="secondary" hidden>Sign out</button></header><p id="notice" role="status" aria-live="polite"></p><div id="screen"></div></main></div><script src="/tv/tv.js" defer></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101513">
+  <title>StreamBot TV</title>
+  <link rel="stylesheet" href="/tv/tv.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <div id="shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="StreamBot TV home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>StreamBot<span class="brand-sub">YOUR PRIVATE STATION</span></span><b>TV</b></a>
+      <nav id="nav" aria-label="Main navigation"></nav>
+      <div class="aside-foot"><span class="workspace-symbol" aria-hidden="true">S</span><div>Private workspace<small>Your media. Your channels.</small></div></div>
+    </aside>
+    <main id="content" tabindex="-1">
+      <div class="workspace-bar"><span>Workspace <span class="path-divider">/</span> <span id="breadcrumb">Getting started</span></span><span class="local-label"><span class="dot"></span> Local control</span></div>
+      <header class="page-header"><div><p class="eyebrow">YOUR BROADCAST DESK</p><h1 id="title">StreamBot TV</h1><p id="page-description" class="page-description">A home for your library and every channel you create.</p></div><div class="header-actions"><span id="user-label" class="user-label" hidden></span><button id="logout" class="secondary" hidden>Sign out</button></div></header>
+      <p id="notice" role="status" aria-live="polite"></p>
+      <div id="screen"></div>
+      <footer class="page-footer"><span>StreamBot TV</span><span>Made for your own little network.</span></footer>
+    </main>
+  </div>
+  <script src="/tv/tv.js" defer></script>
+</body>
+</html>

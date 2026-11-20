@@ -422,13 +422,13 @@
       }
       if (!providers.length)
         el("provider-status").textContent =
-          "No sources configured. Add a provider to MEDIA_SERVERS_CONFIG and restart.";
+          "Your library starts with a connection. Add Jellyfin or Silo under Connections.";
       await search();
+      await refreshQueue();
     } catch (error) {
       message(error.message);
     }
   })();
-  void refreshQueue();
   const timer = setInterval(refreshQueue, 5000);
   window.addEventListener("pagehide", () => clearInterval(timer));
 })();

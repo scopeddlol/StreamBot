@@ -1,1 +1,21 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StreamBot TV · Library</title><link rel="stylesheet" href="/tv/tv.css"></head><body><header class="library-header"><a href="/">◉ StreamBot TV</a><a href="/instances">Instances & queues</a></header><%- body %></body></html>
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#101513"><title>StreamBot TV · Library</title><link rel="stylesheet" href="/tv/tv.css"></head>
+<body>
+<a class="skip" href="#main-content">Skip to content</a>
+<div id="shell">
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="StreamBot TV home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>StreamBot<span class="brand-sub">YOUR PRIVATE STATION</span></span><b>TV</b></a>
+    <nav aria-label="Main navigation">
+      <% const links = [["/", "Overview", "layout-dashboard"], ["/instances", "Instances", "device-tv"], ["/live", "Live TV", "broadcast"], ["/requests", "On Demand", "player-play"], ["/library", "Media Library", "movie"], ["/connections", "Connections", "plug-connected"], ["/permissions", "Permissions", "shield-check"], ["/ai", "AI Concierge", "sparkles"], ["/system", "System & Security", "settings"]]; %>
+      <% links.forEach(([path, label, icon], index) => { %>
+        <% if (index === 0 || index === 5) { %><p class="nav-label"><%= index === 0 ? "WORKSPACE" : "MANAGE" %></p><% } %>
+        <a href="<%= path %>" <% if (path === "/library") { %>class="active" aria-current="page"<% } %>><img class="icon" src="/tv/icons/<%= icon %>.svg" alt="" aria-hidden="true"><span><%= label %></span></a>
+      <% }); %>
+    </nav>
+    <div class="aside-foot"><span class="workspace-symbol" aria-hidden="true">S</span><div>Private workspace<small>Your media. Your channels.</small></div></div>
+  </aside>
+  <div class="library-workspace"><div class="workspace-bar"><span>Workspace <span class="path-divider">/</span> <span id="breadcrumb">Media Library</span></span><span class="local-label"><span class="dot"></span> Local control</span></div><%- body %></div>
+</div>
+</body>
+</html>

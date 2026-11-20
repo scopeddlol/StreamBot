@@ -23,6 +23,71 @@
     if (cls) node.className = cls;
     return node;
   };
+  const iconNames = {
+    "/": "layout-dashboard",
+    "/instances": "device-tv",
+    "/live": "broadcast",
+    "/requests": "player-play",
+    "/library": "movie",
+    "/connections": "plug-connected",
+    "/permissions": "shield-check",
+    "/ai": "sparkles",
+    "/system": "settings",
+  };
+  const descriptions = {
+    "/": "A clear view of your channels, playback and everything in between.",
+    "/instances": "Independent rooms. One place to keep them running.",
+    "/live": "Build a lineup that keeps the good stuff playing.",
+    "/requests": "The right request, in the right room, at the right time.",
+    "/connections":
+      "Bring your media sources and Discord applications together.",
+    "/permissions": "Choose who can watch, request and manage each room.",
+    "/ai": "Find something worth watching in your own library.",
+    "/system": "Keep your workspace secure, backed up and running smoothly.",
+  };
+  function icon(name) {
+    const img = n("img", undefined, "icon");
+    img.src = "/tv/icons/" + name + ".svg";
+    img.alt = "";
+    img.setAttribute("aria-hidden", "true");
+    return img;
+  }
+  function go(path) {
+    history.pushState({}, "", path);
+    navigation();
+    return render();
+  }
+  function pageLink(path, title, detail) {
+    const a = n("a", undefined, "quick-link");
+    a.href = path;
+    const text = n("span");
+    text.append(n("strong", title), n("small", detail));
+    a.append(icon(iconNames[path]), text, icon("arrow-up-right"));
+    if (path !== "/library")
+      a.onclick = (event) => {
+        event.preventDefault();
+        void go(path);
+      };
+    return a;
+  }
+  function roomIdentity(room, index) {
+    const wrap = n("div", undefined, "room-identity");
+    const mark = n(
+      "span",
+      String(index + 1).padStart(2, "0"),
+      "channel-number " + room.mode,
+    );
+    const text = n("span", undefined, "room-label");
+    text.append(
+      n("strong", room.name),
+      n(
+        "small",
+        room.mode === "live" ? "Continuous channel" : "On-demand room",
+      ),
+    );
+    wrap.append(mark, text);
+    return wrap;
+  }
   const tell = (text, error = false) => {
     $("notice").textContent = text;
     $("notice").className = error ? "error" : "";
@@ -86,7 +151,18 @@
     t.append(head, body);
     wrap.append(t);
     parent.append(wrap);
-    if (!rows.length) parent.append(n("p", "Nothing configured yet.", "empty"));
+    if (!rows.length) {
+      const empty = n("div", undefined, "empty");
+      empty.append(
+        icon("device-tv"),
+        n("strong", "A little quiet here"),
+        n(
+          "p",
+          "Your configured items will appear here. Use the controls above to get started.",
+        ),
+      );
+      parent.append(empty);
+    }
     return body;
   }
   const actions = (buttons) => {
@@ -94,7 +170,19 @@
     box.append(...buttons);
     return box;
   };
-  const badge = (state) => n("span", state, "badge " + state);
+  const badge = (state) =>
+    n("span", state.replaceAll("-", " "), "badge " + state);
+  function instanceControls(buttons) {
+    const box = actions(buttons.slice(0, 3));
+    box.classList.add("instance-controls");
+    const details = n("details", undefined, "more-actions");
+    const summary = n("summary", "More");
+    const menu = n("div", undefined, "more-menu");
+    menu.append(...buttons.slice(3));
+    details.append(summary, menu);
+    box.append(details);
+    return box;
+  }
   function form(parent, descriptors, submit, label = "Save") {
     const f = n("form"),
       grid = n("div", undefined, "form-grid"),
@@ -180,6 +268,8 @@
       n("h2", title),
       button("Close", () => d.close()),
     );
+    head.firstElementChild.id = "dialog-title";
+    d.setAttribute("aria-labelledby", "dialog-title");
     d.append(head);
     document.body.append(d);
     d.onclose = () => d.remove();
@@ -222,6 +312,9 @@
       const me = await api("/api/v1/auth/me");
       user = me.user;
       $("logout").hidden = false;
+      $("logout").replaceChildren(icon("logout"), n("span", "Sign out"));
+      $("user-label").textContent = user.username;
+      $("user-label").hidden = false;
       $("logout").onclick = async () => {
         await api("/api/v1/auth/logout", {});
         location.assign("/login");
@@ -244,21 +337,26 @@
     }
   }
   function navigation() {
-    $("nav").replaceChildren(
-      ...sections.map(([path, label]) => {
-        const a = n("a", label);
-        a.href = path;
-        a.className = location.pathname === path ? "active" : "";
-        if (path !== "/library")
-          a.onclick = (event) => {
-            event.preventDefault();
-            history.pushState({}, "", path);
-            navigation();
-            void render();
-          };
-        return a;
-      }),
-    );
+    $("nav").replaceChildren();
+    for (const [index, [path, label]] of sections.entries()) {
+      if (index === 0 || index === 5)
+        $("nav").append(
+          n("p", index === 0 ? "WORKSPACE" : "MANAGE", "nav-label"),
+        );
+      const a = n("a");
+      a.append(icon(iconNames[path]), n("span", label));
+      a.href = path;
+      if (location.pathname === path) {
+        a.className = "active";
+        a.setAttribute("aria-current", "page");
+      }
+      if (path !== "/library")
+        a.onclick = (event) => {
+          event.preventDefault();
+          void go(path);
+        };
+      $("nav").append(a);
+    }
   }
   function onboarding() {
     $("title").textContent = "Your station starts here";
@@ -348,11 +446,17 @@
   async function render() {
     if (rendering) return;
     rendering = true;
+    const loading = n("p", "Loading workspace…", "loading");
+    loading.setAttribute("role", "status");
+    screen.setAttribute("aria-busy", "true");
     try {
-      screen.replaceChildren();
+      screen.replaceChildren(loading);
       $("title").textContent =
         sections.find(([p]) => p === location.pathname)?.[1] || "Overview";
-      $("breadcrumb").textContent = "STREAMBOT TV / " + user.username;
+      $("breadcrumb").textContent = $("title").textContent;
+      $("page-description").textContent =
+        descriptions[location.pathname] || descriptions["/"];
+      screen.dataset.page = location.pathname;
       const page = location.pathname;
       if (page === "/instances") await instanceScreen();
       else if (page === "/connections") await connections();
@@ -364,73 +468,188 @@
       else await overview();
     } catch (e) {
       tell(e.message, true);
+      const error = panel("This view couldn’t load");
+      error.append(
+        n("p", "Check your connection and try again.", "muted"),
+        button("Try again", render),
+      );
     } finally {
+      loading.remove();
+      screen.setAttribute("aria-busy", "false");
       rendering = false;
     }
   }
   async function overview() {
     const rooms = await api("/api/v1/instances");
+    const streaming = rooms.filter((r) => r.state === "streaming").length;
+    const liveCount = rooms.filter((r) => r.mode === "live").length;
+    const hero = n("section", undefined, "station-hero");
+    const intro = n("div", undefined, "hero-copy");
+    const kicker = n(
+      "p",
+      streaming
+        ? "ON AIR · " + streaming + " STREAMING"
+        : "WELCOME TO YOUR STATION",
+      "eyebrow",
+    );
+    intro.append(
+      kicker,
+      n(
+        "h2",
+        streaming
+          ? "Your station is on air."
+          : "One library. Your own channels.",
+      ),
+      n(
+        "p",
+        "Turn your collection into a lineup worth tuning in to. Bring your rooms, requests and next great watch together.",
+      ),
+    );
+    const links = n("div", undefined, "hero-actions");
+    links.append(
+      button("Manage instances", () => go("/instances"), ""),
+      pageLink("/library", "Explore library", ""),
+    );
+    intro.append(links);
+    const dial = n("div", undefined, "station-dial");
+    dial.setAttribute(
+      "aria-label",
+      rooms.length +
+        " configured rooms: " +
+        liveCount +
+        " live and " +
+        (rooms.length - liveCount) +
+        " on demand",
+    );
+    const dialContent = n("div");
+    dialContent.append(
+      icon("broadcast"),
+      n("strong", String(rooms.length).padStart(2, "0")),
+      n("span", "CONFIGURED ROOMS"),
+    );
+    dial.append(dialContent);
+    hero.append(intro, dial);
+    screen.append(hero);
     const stats = n("div", undefined, "grid stats");
-    for (const [label, value] of [
-      ["Instances", rooms.length],
+    for (const [label, value, hint, symbol] of [
+      [
+        "Total instances",
+        rooms.length,
+        liveCount + " live · " + (rooms.length - liveCount) + " on demand",
+        "device-tv",
+      ],
       [
         "Online",
         rooms.filter((r) => ["ready", "streaming"].includes(r.state)).length,
+        "Ready or currently streaming",
+        "plug-connected",
       ],
-      ["Streaming", rooms.filter((r) => r.state === "streaming").length],
+      [
+        "Streaming now",
+        streaming,
+        streaming ? "Playback in progress" : "No active broadcasts",
+        "broadcast",
+      ],
       [
         "Worker memory",
         Math.round(
           rooms.reduce((n, r) => n + (r.metrics?.rss || 0), 0) / 1048576,
         ) + " MB",
+        "Across playback workers",
+        "settings",
       ],
     ]) {
-      const box = panel(label, stats);
-      box.append(n("strong", String(value), "number"));
+      const box = n("section", undefined, "stat");
+      const top = n("div", undefined, "stat-top");
+      top.append(n("span", label), icon(symbol));
+      box.append(top, n("strong", String(value), "number"), n("small", hint));
+      stats.append(box);
     }
     screen.append(stats);
-    const box = panel("Your channels");
+    const layout = n("div", undefined, "overview-layout");
+    screen.append(layout);
+    const box = panel("", layout);
+    box.classList.add("lineup-panel");
+    const heading = n("div", undefined, "section-heading");
+    const titles = n("div");
+    titles.append(
+      n("h2", "Channel lineup"),
+      n("p", "Every room has its own rhythm."),
+    );
+    const manage = n("a", "View all instances", "text-link");
+    manage.href = "/instances";
+    manage.onclick = (event) => {
+      event.preventDefault();
+      void go("/instances");
+    };
+    heading.append(titles, manage);
+    box.append(heading);
     table(
-      ["Instance", "Mode", "State", "Now playing"],
-      rooms.map((r) => [
-        button(r.name, () => {
-          activeRoom = r.id;
-          history.pushState({}, "", "/instances");
-          navigation();
-          return render();
-        }),
-        r.mode,
-        badge(r.state),
-        r.current
-          ? `${r.current.title} · ${Math.floor((r.current.elapsedMs || 0) / 60000)} min elapsed${r.current.durationMs ? " / " + Math.round(r.current.durationMs / 60000) + " min" : ""}`
-          : r.error || "Idle",
-      ]),
+      ["Channel", "Status", "Now playing"],
+      rooms.map((r, i) => {
+        const identity = button(
+          "",
+          () => {
+            activeRoom = r.id;
+            return go("/instances");
+          },
+          "room-link",
+        );
+        identity.append(roomIdentity(r, i));
+        const playback = n("div", undefined, "playback-cell");
+        playback.append(
+          n(
+            "span",
+            r.current ? r.current.title : r.error || "Awaiting playback",
+            r.error ? "error" : "",
+          ),
+        );
+        if (r.current)
+          playback.append(
+            n(
+              "small",
+              Math.floor((r.current.elapsedMs || 0) / 60000) + " min elapsed",
+            ),
+          );
+        return [identity, badge(r.state), playback];
+      }),
       box,
     );
-    if (!rooms.length) {
+    if (!rooms.length)
       box.append(
-        n(
-          "p",
-          "Add your media and Discord connections, then create six live channels and two on-demand rooms—or any number within your resource limits.",
-        ),
-        button(
-          "Add connections",
-          () => {
-            history.pushState({}, "", "/connections");
-            navigation();
-            return render();
-          },
-          "",
-        ),
+        button("Create your first instance", () => instanceEditor(), ""),
       );
-    }
-    panel("Transport & broadcast permissions").append(
-      n(
-        "p",
-        "Official Discord applications provide legitimate commands and interactions. Native Go Live is available only through the explicitly experimental user-account transport, which violates Discord policy and can lead to account suspension. Broadcast only authorized content.",
-        "warning",
+    const side = n("div", undefined, "overview-side");
+    layout.append(side);
+    const quick = panel("Make yourself at home", side);
+    quick.append(
+      pageLink("/live", "Build your lineup", "Playlists that keep rolling"),
+      pageLink("/requests", "Take a request", "A room for every watch"),
+      pageLink(
+        "/connections",
+        "Connect your library",
+        "Jellyfin, Silo and Discord",
       ),
     );
+    const note = panel("", side);
+    note.classList.add("broadcast-note");
+    note.append(
+      icon("shield-check"),
+      n("h3", "Your station. Your responsibility."),
+      n(
+        "p",
+        "Broadcast content you have permission to share. Official Discord bots handle commands; native video requires the experimental account transport.",
+      ),
+    );
+    const details = n("details");
+    details.append(
+      n("summary", "About experimental playback"),
+      n(
+        "p",
+        "User-account self-bots violate Discord policy and may lead to account suspension. Official bot tokens cannot broadcast native Go Live video.",
+      ),
+    );
+    note.append(details);
   }
   async function instanceEditor(existing) {
     const providers = await api("/api/v1/providers");
@@ -682,7 +901,12 @@
       const select = n("select");
       select.setAttribute("aria-label", label + " filter");
       for (const value of values) {
-        const option = n("option", value);
+        const option = n(
+          "option",
+          value === "all"
+            ? "All " + label.toLowerCase() + "s"
+            : value.replaceAll("-", " "),
+        );
         option.value = value;
         select.append(option);
       }
@@ -703,10 +927,22 @@
             (roomStateFilter === "all" || r.state === roomStateFilter),
         )
         .map((r) => [
-          n("span", `${r.name}\n${r.guildId} / ${r.voiceChannelId}`),
+          (() => {
+            const item = roomIdentity(r, rooms.indexOf(r));
+            item.lastElementChild.append(
+              n(
+                "small",
+                `${r.guildId} / ${r.voiceChannelId}`,
+                "destination-ids",
+              ),
+            );
+            return item;
+          })(),
           r.mode,
-          n("span", r.error ? `${r.state} · ${r.error}` : r.state),
-          actions([
+          r.error
+            ? n("span", `${r.state} · ${r.error}`, "error")
+            : badge(r.state),
+          instanceControls([
             button("Queue", () => {
               activeRoom = r.id;
               return queueDetail(r);
@@ -714,7 +950,9 @@
             ...["start", "stop", "restart", "connect", "disconnect"].map(
               (action) =>
                 button(
-                  action === "connect" ? "Join / move VC" : action,
+                  action === "connect"
+                    ? "Join / move VC"
+                    : action.charAt(0).toUpperCase() + action.slice(1),
                   async () => {
                     await api(`/api/v1/instances/${r.id}/${action}`, {});
                     tell(
